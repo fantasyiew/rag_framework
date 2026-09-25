@@ -25,6 +25,16 @@ class VectorStore(ABC):
     ) -> list[RetrievedChunk]: ...
 
 
+class KeywordStore(ABC):
+    @abstractmethod
+    async def upsert(self, chunks: list[Chunk]) -> None: ...
+
+    @abstractmethod
+    async def search(
+        self, query: str, *, top_k: int, filters: dict[str, object]
+    ) -> list[RetrievedChunk]: ...
+
+
 class Reranker(ABC):
     @abstractmethod
     async def rerank(self, query: str, candidates: list[RetrievedChunk]) -> list[RetrievedChunk]: ...

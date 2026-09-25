@@ -73,6 +73,7 @@ class ChromaVectorStore(VectorStore):
                 score=1 / (1 + distance),
                 source="vector",
                 rank=rank,
+                component_scores={"vector": 1 / (1 + distance)},
             )
             for rank, (chunk_id, content, metadata, distance) in enumerate(
                 zip(ids, documents, metadatas, distances), start=1

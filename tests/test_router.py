@@ -1,6 +1,6 @@
 import pytest
 
-from rag_framework.core.models import Query, QueryType
+from rag_framework.core.models import Query, QueryType, RetrievalStrategy
 from rag_framework.providers.router import HeuristicQueryRouter
 
 
@@ -21,3 +21,11 @@ async def test_router_expands_conversational_reference() -> None:
     assert plan.query_type == QueryType.CONVERSATION_FOLLOWUP
     assert plan.rewrite_required is True
     assert plan.rewritten_queries
+
+
+@pytest.mark.asyncio
+async def test_router_uses_hybrid_for_short_fact_lookup() -> None:
+    plan = await HeuristicQueryRouter().plan(Query(text="RRF algorithm"))
+
+    assert plan.query_type == QueryType.FACT_LOOKUP
+    assert plan.strategy == RetrievalStrategy.HYBRID

@@ -23,14 +23,14 @@ class HeuristicQueryRouter(QueryRouter):
             return RetrievalPlan(
                 query_type=QueryType.FILTERED_SEARCH,
                 filters=query.filters,
-                strategy=RetrievalStrategy.VECTOR,
+                strategy=RetrievalStrategy.HYBRID,
                 reason="Caller provided metadata filters.",
                 confidence=0.95,
             )
         if len(text.split()) <= 5:
             return RetrievalPlan(
                 query_type=QueryType.FACT_LOOKUP,
-                strategy=RetrievalStrategy.VECTOR,
+                strategy=RetrievalStrategy.HYBRID,
                 rewrite_required=False,
                 reason="Short entity-oriented query.",
                 confidence=0.65,
@@ -38,9 +38,8 @@ class HeuristicQueryRouter(QueryRouter):
         return RetrievalPlan(
             query_type=QueryType.SEMANTIC_QUESTION,
             strategy=RetrievalStrategy.VECTOR,
-            rewrite_required=True,
-            rewritten_queries=[text],
-            reason="Natural-language question; retain original query and allow expansion.",
+            rewrite_required=False,
+            reason="Natural-language question; semantic retrieval is the safe fallback.",
             confidence=0.6,
         )
 

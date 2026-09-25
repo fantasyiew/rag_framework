@@ -1,21 +1,49 @@
-"""Adaptive retrieval orchestration with full decision trace."""
+"""Adaptive retrieval orchestration with strategy execution and full decision trace."""
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterable
 from time import perf_counter
 
-from rag_framework.contracts.providers import Embedder, QueryRouter, Reranker, VectorStore
-from rag_framework.core.models import Query, RetrievalTrace, RetrievedChunk
+from rag_framework.contracts.providers import (
+    Embedder,
+    KeywordStore,
+    QueryRouter,
+    Reranker,
+    VectorStore,
+)
+from rag_framework.core.models import (
+    Query,
+    RetrievalStrategy,
+    RetrievalTrace,
+    RetrievedChunk,
+)
+from rag_framework.pipeline.fusion import reciprocal_rank_fusion
 
 
 class AdaptiveRetriever:
     def __init__(
-        self, vector_store: VectorStore, embedder: Embedder, router: QueryRouter, reranker: Reranker | None = None
+        self,
+        vector_store: VectorStore,
+        embedder: Embedder,
+        router: QueryRouter,
+        keyword_store: KeywordStore | None = None,
+        reranker: Reranker | None = None,
+        hybrid_candidate_multiplier: int = 2,
+        rrf_rank_constant: int = 60,
     ) -> None:
+        if hybrid_candidate_multiplier < 1:
+            raise ValueError("hybrid_candidate_multiplier must be at least 1")
+        if rrf_rank_constant < 0:
+            raise ValueError("rrf_rank_constant must be non-negative")
         self.vector_store = vector_store
         self.embedder = embedder
         self.router = router
+        self.keyword_store = keyword_store
         self.reranker = reranker
+        self.hybrid_candidate_multiplier = hybrid_candidate_multiplier
+        self.rrf_rank_constant = rrf_rank_constant
 
     async def retrieve(self, query: Query) -> RetrievalTrace:
         trace = RetrievalTrace(query=query)
@@ -24,30 +52,171 @@ class AdaptiveRetriever:
         trace.plan = plan
         trace.add_step("route_query", (perf_counter() - started) * 1000, plan=plan.model_dump())
 
-        queries = [query.text, *plan.rewritten_queries] if plan.rewrite_required else [query.text]
+        retrieval_queries = (
+            [query.text, *plan.rewritten_queries] if plan.rewrite_required else [query.text]
+        )
+        filters = {**query.filters, **plan.filters}
         candidates: dict[str, RetrievedChunk] = {}
-        for retrieval_query in dict.fromkeys(queries):
-            search_started = perf_counter()
-            embedding = await self.embedder.embed_query(retrieval_query)
-            results = await self.vector_store.search(
-                embedding, top_k=plan.top_k, filters={**query.filters, **plan.filters}
-            )
-            trace.add_step(
-                "vector_search",
-                (perf_counter() - search_started) * 1000,
-                retrieval_query=retrieval_query,
-                result_count=len(results),
+        for retrieval_query in dict.fromkeys(retrieval_queries):
+            results = await self._execute_strategy(
+                strategy=plan.strategy,
+                query=retrieval_query,
+                top_k=plan.top_k,
+                filters=filters,
+                trace=trace,
             )
             for result in results:
                 previous = candidates.get(result.chunk.id)
                 if previous is None or result.score > previous.score:
                     candidates[result.chunk.id] = result
 
-        trace.candidates = sorted(candidates.values(), key=lambda item: item.score, reverse=True)
-        if self.reranker and trace.plan.rerank:
+        trace.candidates = self._rerank_positions(candidates.values())
+        if self.reranker and plan.rerank:
             rerank_started = perf_counter()
-            trace.final_context = await self.reranker.rerank(query.text, trace.candidates)
-            trace.add_step("rerank", (perf_counter() - rerank_started) * 1000)
+            reranked = await self.reranker.rerank(query.text, trace.candidates)
+            trace.final_context = self._rerank_positions(reranked[: plan.top_k])
+            trace.add_step(
+                "rerank",
+                (perf_counter() - rerank_started) * 1000,
+                input_count=len(trace.candidates),
+                output_count=len(trace.final_context),
+            )
         else:
             trace.final_context = trace.candidates[: plan.top_k]
         return trace
+
+    async def _execute_strategy(
+        self,
+        *,
+        strategy: RetrievalStrategy,
+        query: str,
+        top_k: int,
+        filters: dict[str, object],
+        trace: RetrievalTrace,
+    ) -> list[RetrievedChunk]:
+        if strategy == RetrievalStrategy.KEYWORD:
+            if self.keyword_store is None:
+                return await self._fallback_to_vector(query, top_k, filters, trace, strategy)
+            return await self._keyword_search(query, top_k, filters, trace)
+
+        if strategy == RetrievalStrategy.HYBRID:
+            if self.keyword_store is None:
+                return await self._fallback_to_vector(query, top_k, filters, trace, strategy)
+            return await self._hybrid_search(query, top_k, filters, trace)
+
+        return await self._vector_search(query, top_k, filters, trace)
+
+    async def _vector_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict[str, object],
+        trace: RetrievalTrace,
+    ) -> list[RetrievedChunk]:
+        started = perf_counter()
+        results = await self._vector_search_without_trace(query, top_k, filters)
+        trace.add_step(
+            "vector_search",
+            (perf_counter() - started) * 1000,
+            retrieval_query=query,
+            result_count=len(results),
+        )
+        return results
+
+    async def _keyword_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict[str, object],
+        trace: RetrievalTrace,
+    ) -> list[RetrievedChunk]:
+        if self.keyword_store is None:
+            return []
+        started = perf_counter()
+        results = await self.keyword_store.search(query, top_k=top_k, filters=filters)
+        trace.add_step(
+            "keyword_search",
+            (perf_counter() - started) * 1000,
+            retrieval_query=query,
+            result_count=len(results),
+            keyword_backends=self._keyword_backends(results),
+            fallback_used=self._fallback_used(results),
+        )
+        return results
+
+    async def _hybrid_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict[str, object],
+        trace: RetrievalTrace,
+    ) -> list[RetrievedChunk]:
+        if self.keyword_store is None:
+            return []
+        candidate_k = top_k * self.hybrid_candidate_multiplier
+        started = perf_counter()
+        vector_results, keyword_results = await asyncio.gather(
+            self._vector_search_without_trace(query, candidate_k, filters),
+            self.keyword_store.search(query, top_k=candidate_k, filters=filters),
+        )
+        trace.add_step(
+            "hybrid_recall",
+            (perf_counter() - started) * 1000,
+            retrieval_query=query,
+            vector_count=len(vector_results),
+            keyword_count=len(keyword_results),
+            candidate_k=candidate_k,
+            keyword_backends=self._keyword_backends(keyword_results),
+            fallback_used=self._fallback_used(keyword_results),
+        )
+
+        fusion_started = perf_counter()
+        fused = reciprocal_rank_fusion(
+            {"vector": vector_results, "keyword": keyword_results},
+            top_k=top_k,
+            rank_constant=self.rrf_rank_constant,
+        )
+        trace.add_step(
+            "rrf_fusion",
+            (perf_counter() - fusion_started) * 1000,
+            input_count=len(vector_results) + len(keyword_results),
+            output_count=len(fused),
+            rank_constant=self.rrf_rank_constant,
+        )
+        return fused
+
+    async def _vector_search_without_trace(
+        self, query: str, top_k: int, filters: dict[str, object]
+    ) -> list[RetrievedChunk]:
+        embedding = await self.embedder.embed_query(query)
+        return await self.vector_store.search(embedding, top_k=top_k, filters=filters)
+
+    async def _fallback_to_vector(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict[str, object],
+        trace: RetrievalTrace,
+        requested_strategy: RetrievalStrategy,
+    ) -> list[RetrievedChunk]:
+        trace.add_step(
+            "strategy_fallback",
+            0,
+            requested_strategy=requested_strategy.value,
+            fallback_strategy=RetrievalStrategy.VECTOR.value,
+            reason="Keyword store is not configured.",
+        )
+        return await self._vector_search(query, top_k, filters, trace)
+
+    @staticmethod
+    def _rerank_positions(results: Iterable[RetrievedChunk]) -> list[RetrievedChunk]:
+        ranked = sorted(results, key=lambda item: (-item.score, item.chunk.id))
+        return [result.model_copy(update={"rank": rank}) for rank, result in enumerate(ranked, 1)]
+
+    @staticmethod
+    def _keyword_backends(results: Iterable[RetrievedChunk]) -> list[str]:
+        return sorted({result.source for result in results if result.source.startswith("keyword")})
+
+    @staticmethod
+    def _fallback_used(results: Iterable[RetrievedChunk]) -> bool:
+        return any("fallback" in result.source for result in results)

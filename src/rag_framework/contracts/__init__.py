@@ -1,3 +1,17 @@
-from .providers import Embedder, QueryRouter, Reranker, StructuredOutputLLM, VectorStore
+from .providers import (
+    Embedder,
+    KeywordStore,
+    QueryRouter,
+    Reranker,
+    StructuredOutputLLM,
+    VectorStore,
+)
 
-__all__ = ["Embedder", "QueryRouter", "Reranker", "StructuredOutputLLM", "VectorStore"]
+__all__ = [
+    "Embedder",
+    "KeywordStore",
+    "QueryRouter",
+    "Reranker",
+    "StructuredOutputLLM",
+    "VectorStore",
+]

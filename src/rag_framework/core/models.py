@@ -60,6 +60,7 @@ class RetrievedChunk(BaseModel):
     score: float
     source: str
     rank: int = Field(ge=1)
+    component_scores: dict[str, float] = Field(default_factory=dict)
 
 
 class TraceStep(BaseModel):
