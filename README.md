@@ -1,5 +1,41 @@
 # RAG Framework
 
+## 重排
+
+支持 `disabled`、`cross_encoder`、`cloud` 和 `auto`。`cloud` 使用云端服务且失败时报错；
+`auto` 在云端 URL 和密钥齐全时优先使用云端，否则使用本地 CrossEncoder，运行失败时恢复原始召回顺序并记录异常类型。
+
+DashScope `gte-rerank-v2` 使用 `dashscope` 协议及 SDK 默认端点：
+
+```env
+RAG_RERANKER_MODE=cloud
+RAG_RERANKER_CLOUD_PROTOCOL=dashscope
+RAG_RERANKER_CLOUD_MODEL=gte-rerank-v2
+RAG_RERANKER_CLOUD_URL=https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank
+RAG_RERANKER_CLOUD_API_KEY=your-dashscope-api-key
+```
+
+使用结果位于响应顶层 `results` 的兼容接口时，将协议改为 `compatible`。
+请求始终要求云端返回全部候选；返回索引缺失、重复、越界或分数非法时视为失败。
+
+本地 CrossEncoder 需安装可选依赖 `pip install -e ".[rerank]"`，并配置
+`RAG_RERANKER_MODEL=本地模型路径`。默认模型名称仅用于英文入门测试；
+中文场景请配置适合中文的 CrossEncoder。
+默认模型名称仅用于英文入门测试；中文场景请配置适合中文的 CrossEncoder。
+
+模型按首次请求懒加载，默认 `RAG_RERANKER_LOCAL_FILES_ONLY=true`，
+不会自动下载权重。需要下载时可显式设置为 false。
+`RAG_RERANKER_DEVICE` 控制 CPU/GPU，`RAG_RERANKER_BATCH_SIZE` 控制推理批次。
+健康接口中的 lazy 表示已配置，不代表权重已经成功加载。
+
+`RAG_RERANKER_CANDIDATE_K=32` 控制重排候选池；最终返回数量仍由
+Planner 的 top_k 控制。Trace 保留原始 candidates 和 rerank_comparison，
+后者包含每个候选的原排名、新排名、召回分数与重排分数，以及失败回退原因。
+不同分数体系不可直接比较数值；排名对比也不等同于检索质量评估。
+
+真实模型集成测试通过 `RAG_TEST_RERANK_MODEL` 指向缓存模型或本地路径启用；
+未设置时跳过，不下载权重。普通测试使用模拟预测器验证排序与回退。
+
 面向开发者的可观测 RAG 框架。第一版提供 Chroma 默认实现、可插拔提供方契约、自适应检索路由和完整检索追踪。
 
 ## 设计目标

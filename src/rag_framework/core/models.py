@@ -149,6 +149,21 @@ class RetrievedChunk(BaseModel):
     component_scores: dict[str, float] = Field(default_factory=dict)
 
 
+class RankChange(BaseModel):
+    chunk_id: str
+    original_rank: int
+    final_rank: int
+    original_score: float
+    rerank_score: float | None = None
+
+
+class RerankComparison(BaseModel):
+    model: str
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+    changes: list[RankChange] = Field(default_factory=list)
+
+
 class TraceStep(BaseModel):
     name: str
     duration_ms: float = Field(ge=0)
@@ -159,6 +174,7 @@ class RetrievalTrace(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     query: Query
     plan: RetrievalPlan | None = None
+    rerank_comparison: RerankComparison | None = None
     retrieval_queries: list[str] = Field(default_factory=list)
     candidates: list[RetrievedChunk] = Field(default_factory=list)
     final_context: list[RetrievedChunk] = Field(default_factory=list)

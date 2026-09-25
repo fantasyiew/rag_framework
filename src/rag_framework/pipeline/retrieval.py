@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Iterable
 from time import perf_counter
 
@@ -16,6 +17,8 @@ from rag_framework.contracts.providers import (
 )
 from rag_framework.core.models import (
     Query,
+    RankChange,
+    RerankComparison,
     RetrievalStrategy,
     RetrievalTrace,
     RetrievedChunk,
@@ -33,6 +36,8 @@ class AdaptiveRetriever(Retriever):
         reranker: Reranker | None = None,
         hybrid_candidate_multiplier: int = 2,
         rrf_rank_constant: int = 60,
+        reranker_candidate_k: int = 32,
+        reranker_fail_open: bool = True,
     ) -> None:
         if hybrid_candidate_multiplier < 1:
             raise ValueError("hybrid_candidate_multiplier must be at least 1")
@@ -45,6 +50,10 @@ class AdaptiveRetriever(Retriever):
         self.reranker = reranker
         self.hybrid_candidate_multiplier = hybrid_candidate_multiplier
         self.rrf_rank_constant = rrf_rank_constant
+        if reranker_candidate_k < 1:
+            raise ValueError("reranker_candidate_k must be positive")
+        self.reranker_candidate_k = reranker_candidate_k
+        self.reranker_fail_open = reranker_fail_open
 
     async def retrieve(self, query: Query) -> RetrievalTrace:
         trace = RetrievalTrace(query=query)
@@ -84,7 +93,8 @@ class AdaptiveRetriever(Retriever):
             results = await self._execute_strategy(
                 strategy=plan.strategy,
                 query=retrieval_query,
-                top_k=plan.top_k,
+                top_k=(max(plan.top_k, self.reranker_candidate_k)
+                       if self.reranker and plan.rerank else plan.top_k),
                 filters=filters,
                 trace=trace,
             )
@@ -95,14 +105,43 @@ class AdaptiveRetriever(Retriever):
 
         trace.candidates = self._rerank_positions(candidates.values())
         if self.reranker and plan.rerank:
+            trace.candidates = trace.candidates[:max(plan.top_k, self.reranker_candidate_k)]
             rerank_started = perf_counter()
-            reranked = await self.reranker.rerank(query.text, trace.candidates)
-            trace.final_context = self._rerank_positions(reranked[: plan.top_k])
+            model = getattr(self.reranker, "model_name", type(self.reranker).__name__)
+            reason = None
+            try:
+                reranked = await self.reranker.rerank(
+                    query.text, [item.model_copy(deep=True) for item in trace.candidates]
+                )
+                expected = {item.chunk.id for item in trace.candidates}
+                if (len(reranked) != len(expected)
+                        or {item.chunk.id for item in reranked} != expected
+                        or any(not math.isfinite(item.score) for item in reranked)):
+                    raise ValueError("Reranker must return every candidate once with finite scores")
+            except Exception as exc:
+                if not self.reranker_fail_open:
+                    raise
+                reason = type(exc).__name__
+                reranked = trace.candidates
+            # Provider order is authoritative; never re-sort by old recall scores.
+            reranked = [item.model_copy(update={"rank": rank})
+                        for rank, item in enumerate(reranked, 1)]
+            trace.final_context = reranked[:plan.top_k]
+            original = {item.chunk.id: item for item in trace.candidates}
+            trace.rerank_comparison = RerankComparison(
+                model=model, fallback_used=reason is not None, fallback_reason=reason,
+                changes=[RankChange(
+                    chunk_id=item.chunk.id, original_rank=original[item.chunk.id].rank,
+                    final_rank=item.rank, original_score=original[item.chunk.id].score,
+                    rerank_score=item.score if reason is None else None,
+                ) for item in reranked],
+            )
             trace.add_step(
                 "rerank",
                 (perf_counter() - rerank_started) * 1000,
                 input_count=len(trace.candidates),
                 output_count=len(trace.final_context),
+                **trace.rerank_comparison.model_dump(),
             )
         else:
             trace.final_context = trace.candidates[: plan.top_k]

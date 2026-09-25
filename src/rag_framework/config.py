@@ -14,6 +14,20 @@ class Settings(BaseSettings):
     chroma_collection: str = "documents"
     embedding_dimensions: int = 384
     default_top_k: int = 8
+    reranker_mode: Literal["disabled", "cross_encoder", "cloud", "auto"] = "disabled"
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    reranker_device: str = "cpu"
+    reranker_batch_size: int = Field(default=16, ge=1)
+    reranker_candidate_k: int = Field(default=32, ge=1, le=1000)
+    reranker_local_files_only: bool = True
+    reranker_cloud_protocol: Literal["dashscope", "compatible"] = "dashscope"
+    reranker_cloud_model: str = "gte-rerank-v2"
+    reranker_cloud_url: str | None = (
+        "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    )
+    reranker_cloud_api_key: SecretStr | None = None
+    reranker_cloud_timeout: float = Field(default=30.0, gt=0)
+    reranker_cloud_instruct: str | None = None
     query_planner_mode: Literal["heuristic", "llm", "auto"] = "auto"
     planner_model: str = "gpt-4o-mini"
     planner_api_key: SecretStr | None = None

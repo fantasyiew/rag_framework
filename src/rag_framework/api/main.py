@@ -20,6 +20,7 @@ from rag_framework.providers import (
     HashEmbedder,
     build_answer_generator,
     build_query_planner,
+    build_reranker,
     create_keyword_store,
 )
 
@@ -38,12 +39,16 @@ keyword_store = create_keyword_store(settings)
 embedder = HashEmbedder(settings.embedding_dimensions)
 planner_runtime = build_query_planner(settings)
 generator_runtime = build_answer_generator(settings)
+reranker = build_reranker(settings)
 indexing_pipeline = IndexingPipeline(CharacterChunker(), embedder, vector_store, keyword_store)
 retriever = AdaptiveRetriever(
     vector_store,
     embedder,
     planner_runtime.planner,
     keyword_store,
+    reranker=reranker,
+    reranker_candidate_k=settings.reranker_candidate_k,
+    reranker_fail_open=settings.reranker_mode == "auto",
     hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,
     rrf_rank_constant=settings.rrf_rank_constant,
 )
@@ -60,6 +65,9 @@ async def lifespan(app: FastAPI):
     close = getattr(keyword_store, "close", None)
     if close is not None:
         await close()
+    close_reranker = getattr(reranker, "close", None)
+    if close_reranker is not None:
+        await close_reranker()
 
 app = FastAPI(
     title="RAG Framework API",
@@ -78,6 +86,13 @@ async def health() -> dict[str, Any]:
         "configured_keyword_backend": settings.keyword_backend,
         "active_keyword_store": type(keyword_store).__name__,
         "keyword_primary_healthy": primary_healthy,
+        "reranker_mode": settings.reranker_mode,
+        "reranker_model": getattr(reranker, "model_name", None),
+        "reranker_provider": type(reranker).__name__ if reranker else None,
+        "reranker_loading": (
+            "lazy" if type(reranker).__name__ == "CrossEncoderReranker" else
+            "remote" if reranker else "disabled"
+        ),
         "configured_query_planner_mode": planner_runtime.configured_mode,
         "active_query_planner_mode": planner_runtime.active_mode,
         "query_planner_provider": planner_runtime.provider,
