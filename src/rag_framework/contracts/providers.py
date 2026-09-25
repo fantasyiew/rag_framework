@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 
-from rag_framework.core.models import Chunk, Query, RetrievalPlan, RetrievedChunk
+from rag_framework.core.models import Chunk, Query, RetrievalPlan, RetrievalTrace, RetrievedChunk
 
 
 class Embedder(ABC):
@@ -47,6 +48,27 @@ class QueryPlanner(ABC):
 
 # Backwards-compatible name for integrations built against the first release.
 QueryRouter = QueryPlanner
+
+
+class Retriever(ABC):
+    @abstractmethod
+    async def retrieve(self, query: Query) -> RetrievalTrace: ...
+
+
+class AnswerGenerator(ABC):
+    @property
+    @abstractmethod
+    def model_name(self) -> str: ...
+
+    @property
+    def fallback_used(self) -> bool:
+        return False
+
+    @abstractmethod
+    async def generate(self, query: Query, contexts: list[RetrievedChunk]) -> str: ...
+
+    @abstractmethod
+    def stream(self, query: Query, contexts: list[RetrievedChunk]) -> AsyncIterator[str]: ...
 
 
 class StructuredOutputLLM(ABC):

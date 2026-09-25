@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 from time import time
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
@@ -167,3 +167,28 @@ class RetrievalTrace(BaseModel):
 
     def add_step(self, name: str, duration_ms: float, **details: Any) -> None:
         self.steps.append(TraceStep(name=name, duration_ms=duration_ms, details=details))
+
+
+class Citation(BaseModel):
+    number: int = Field(ge=1)
+    chunk_id: str
+    document_id: str
+    source_uri: str | None = None
+    content_preview: str
+
+
+class GeneratedAnswer(BaseModel):
+    text: str
+    citations: list[Citation] = Field(default_factory=list)
+    model: str
+    fallback_used: bool = False
+
+
+class RAGResponse(BaseModel):
+    retrieval: RetrievalTrace
+    answer: GeneratedAnswer
+
+
+class RAGStreamEvent(BaseModel):
+    type: Literal["retrieval", "token", "complete"]
+    data: dict[str, Any]

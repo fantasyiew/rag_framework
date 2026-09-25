@@ -11,6 +11,7 @@ from rag_framework.contracts.providers import (
     KeywordStore,
     QueryPlanner,
     Reranker,
+    Retriever,
     VectorStore,
 )
 from rag_framework.core.models import (
@@ -22,7 +23,7 @@ from rag_framework.core.models import (
 from rag_framework.pipeline.fusion import reciprocal_rank_fusion
 
 
-class AdaptiveRetriever:
+class AdaptiveRetriever(Retriever):
     def __init__(
         self,
         vector_store: VectorStore,

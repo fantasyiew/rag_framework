@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     planner_max_retries: int = Field(default=2, ge=0)
     planner_minimum_confidence: float = Field(default=0.55, ge=0.0, le=1.0)
     planner_max_rewrites: int = Field(default=4, ge=0, le=10)
+    answer_generator_mode: Literal["extractive", "llm", "auto"] = "auto"
+    generation_model: str | None = None
+    generation_api_key: SecretStr | None = None
+    generation_base_url: str | None = None
+    generation_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    generation_request_timeout: float = Field(default=60.0, gt=0)
+    generation_max_retries: int = Field(default=2, ge=0)
+    generation_max_tokens: int = Field(default=1024, ge=1)
+    generation_max_context_chunks: int = Field(default=8, ge=1, le=100)
     hybrid_candidate_multiplier: int = Field(default=2, ge=1)
     rrf_rank_constant: int = Field(default=60, ge=0)
     keyword_backend: Literal["memory", "elasticsearch"] = "memory"

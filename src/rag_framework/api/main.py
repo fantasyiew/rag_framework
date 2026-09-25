@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from rag_framework.config import settings
-from rag_framework.core.models import Document, Query, RetrievalPlan, RetrievalTrace
+from rag_framework.core.models import Document, Query, RAGResponse, RetrievalPlan, RetrievalTrace
+from rag_framework.pipeline.generation import GenerationPipeline
 from rag_framework.pipeline.indexing import CharacterChunker, IndexingPipeline
 from rag_framework.pipeline.retrieval import AdaptiveRetriever
 from rag_framework.providers import (
     ChromaVectorStore,
     HashEmbedder,
+    build_answer_generator,
     build_query_planner,
     create_keyword_store,
 )
@@ -33,6 +37,7 @@ vector_store = ChromaVectorStore(settings.chroma_directory, settings.chroma_coll
 keyword_store = create_keyword_store(settings)
 embedder = HashEmbedder(settings.embedding_dimensions)
 planner_runtime = build_query_planner(settings)
+generator_runtime = build_answer_generator(settings)
 indexing_pipeline = IndexingPipeline(CharacterChunker(), embedder, vector_store, keyword_store)
 retriever = AdaptiveRetriever(
     vector_store,
@@ -41,6 +46,11 @@ retriever = AdaptiveRetriever(
     keyword_store,
     hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,
     rrf_rank_constant=settings.rrf_rank_constant,
+)
+generation_pipeline = GenerationPipeline(
+    retriever,
+    generator_runtime.generator,
+    max_context_chunks=settings.generation_max_context_chunks,
 )
 
 
@@ -75,6 +85,11 @@ async def health() -> dict[str, Any]:
             settings.planner_model if planner_runtime.active_mode == "llm" else None
         ),
         "query_planner_fallback_reason": planner_runtime.fallback_reason,
+        "configured_answer_generator_mode": generator_runtime.configured_mode,
+        "active_answer_generator_mode": generator_runtime.active_mode,
+        "answer_generator_provider": generator_runtime.provider,
+        "answer_generator_model": generator_runtime.model,
+        "answer_generator_fallback_reason": generator_runtime.fallback_reason,
     }
 
 
@@ -94,3 +109,24 @@ async def plan_query(query: Query) -> RetrievalPlan:
     """Inspect query analysis and strategy selection without running retrieval."""
 
     return await planner_runtime.planner.plan(query)
+
+
+@app.post("/v1/chat", response_model=RAGResponse)
+async def chat(query: Query) -> RAGResponse:
+    return await generation_pipeline.run(query)
+
+
+@app.post("/v1/chat/stream")
+async def stream_chat(query: Query) -> StreamingResponse:
+    async def events():
+        try:
+            async for event in generation_pipeline.stream(query):
+                payload = json.dumps(event.data, ensure_ascii=False, default=str)
+                yield f"event: {event.type}\ndata: {payload}\n\n"
+        except Exception as exc:  # noqa: BLE001 - Convert provider failure to a terminal SSE event.
+            payload = json.dumps(
+                {"error": type(exc).__name__, "message": "Answer generation failed."}
+            )
+            yield f"event: error\ndata: {payload}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")

@@ -40,6 +40,27 @@ RAG_PLANNER_API_KEY=your-api-key
 
 `heuristic` 始终使用规则规划器；`llm` 要求有效的 API Key 并在初始化失败时阻止启动；`auto` 在配置了 API Key 时启用 LLM，否则安全切换到规则规划器。`/health` 会返回配置模式、实际运行模式、Provider 和启动回退原因。`POST /v1/query/plan` 可单独查看分析、改写和策略选择，不会执行向量或关键词检索。
 
+## 回答生成与引用
+
+Generation Pipeline 在检索完成后将最终上下文编号，要求模型只依据上下文回答，并使用 `[1]` 格式添加行内引用。返回结果会将引用编号解析为 `chunk_id`、`document_id`、来源地址和内容预览；生成模型、上下文数量、引用数量、输出长度与耗时会写入同一个 Trace。
+
+- `POST /v1/chat`：返回完整回答、结构化引用和检索/生成 Trace。
+- `POST /v1/chat/stream`：通过 SSE 依次返回 `retrieval`、`token` 和 `complete` 事件；失败时返回终止 `error` 事件。
+
+生成模型默认复用 Planner 的模型、API Key 与 Base URL，也可独立覆盖：
+
+```env
+RAG_ANSWER_GENERATOR_MODE=auto
+# RAG_GENERATION_MODEL=qwen3.7-plus
+# RAG_GENERATION_API_KEY=your-generation-key
+# RAG_GENERATION_BASE_URL=https://your-provider.example/v1
+RAG_GENERATION_REQUEST_TIMEOUT=60
+RAG_GENERATION_MAX_TOKENS=1024
+RAG_GENERATION_MAX_CONTEXT_CHUNKS=8
+```
+
+`extractive` 模式不调用 LLM，只返回带引用的检索证据；`llm` 模式要求可用凭据；`auto` 优先使用 LLM，在未配置凭据或 Provider 初始化失败时使用 extractive 安全回退。
+
 当前支持的检索执行策略：
 
 - `vector`：Chroma 向量召回。
