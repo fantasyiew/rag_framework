@@ -11,6 +11,7 @@ from rag_framework.core.models import (
 )
 from rag_framework.pipeline.retrieval import AdaptiveRetriever
 from rag_framework.providers.bm25 import InMemoryBM25KeywordStore
+from rag_framework.providers.router import HeuristicQueryPlanner
 
 
 class StubEmbedder(Embedder):
@@ -80,7 +81,12 @@ async def test_hybrid_strategy_runs_both_retrievers_and_records_fusion() -> None
 
     assert vector_store.search_count == 1
     assert trace.final_context[0].source == "hybrid"
-    assert [step.name for step in trace.steps] == ["route_query", "hybrid_recall", "rrf_fusion"]
+    assert [step.name for step in trace.steps] == [
+        "analyze_query",
+        "select_retrieval_strategy",
+        "hybrid_recall",
+        "rrf_fusion",
+    ]
 
 
 @pytest.mark.asyncio
@@ -100,3 +106,33 @@ async def test_keyword_strategy_does_not_call_vector_store() -> None:
     assert vector_store.search_count == 0
     assert trace.final_context[0].source == "keyword:memory"
     assert trace.steps[-1].name == "keyword_search"
+
+
+@pytest.mark.asyncio
+async def test_rewritten_query_and_planner_decision_are_visible_in_trace() -> None:
+    vector_store = StubVectorStore([make_result("shared")])
+    keyword_store = InMemoryBM25KeywordStore()
+    await keyword_store.upsert([make_result("shared").chunk])
+    retriever = AdaptiveRetriever(
+        vector_store,
+        StubEmbedder(),
+        HeuristicQueryPlanner(),
+        keyword_store,
+    )
+
+    trace = await retriever.retrieve(
+        Query(text="What does it require?", history=["Explain the security policy"])
+    )
+
+    assert trace.plan is not None
+    assert trace.plan.query_type == QueryType.CONVERSATION_FOLLOWUP
+    assert trace.retrieval_queries == [
+        "What does it require?",
+        "Explain the security policy What does it require?",
+    ]
+    assert [step.name for step in trace.steps[:3]] == [
+        "analyze_query",
+        "rewrite_query",
+        "select_retrieval_strategy",
+    ]
+    assert trace.steps[0].details["planner"] == "heuristic"

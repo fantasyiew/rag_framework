@@ -10,7 +10,35 @@
 
 ## 当前阶段
 
-后端最小闭环：文档入库、Chroma 向量检索、受约束的查询路由与检索 Trace API。默认提供规则路由；任意支持结构化 JSON 输出的 LLM 均可通过 `LLMQueryRouter` 接入，并在错误时回退到规则路由。
+后端最小闭环：文档入库、Chroma 向量检索、结构化 Query Planner 与检索 Trace API。默认提供低延迟规则规划器；任意支持结构化 JSON 输出的 LLM 均可通过 `LLMQueryPlanner` 接入，并在错误时回退到规则规划器。
+
+## 自适应 Query Planner
+
+规划结果分为两部分：
+
+- `QueryAnalysis`：查询类型、规范化 Query、关键词、过滤条件、是否改写、改写列表、理由和置信度。
+- `RetrievalDecision`：选择 `vector`、`keyword` 或 `hybrid`，以及 `top_k`、是否重排、理由和置信度。
+
+当前规则规划器识别精确标识符、事实查询、语义问题、过滤查询、比较、多跳问题和对话追问。LLM 规划器会约束结构化输出、清理重复改写，并始终保留原始 Query；低置信度或歧义结果自动切换到 hybrid，模型调用或格式校验失败则回退到规则规划器。
+
+检索 Trace 将规划过程拆分为 `analyze_query`、`rewrite_query`（需要时）和 `select_retrieval_strategy`，并记录规划器类型、回退原因、最终生效的 Query 列表和完整决策。旧版 `QueryRouter`、`HeuristicQueryRouter` 与 `LLMQueryRouter` 名称仍作为兼容别名保留。
+
+安装并启用 OpenAI-compatible LLM Planner：
+
+```powershell
+python -m pip install -e ".[dev,llm]"
+Copy-Item .env.example .env
+```
+
+```env
+RAG_QUERY_PLANNER_MODE=auto
+RAG_PLANNER_MODEL=gpt-4o-mini
+RAG_PLANNER_API_KEY=your-api-key
+# 使用其他 OpenAI-compatible 服务时设置：
+# RAG_PLANNER_BASE_URL=https://your-provider.example/v1
+```
+
+`heuristic` 始终使用规则规划器；`llm` 要求有效的 API Key 并在初始化失败时阻止启动；`auto` 在配置了 API Key 时启用 LLM，否则安全切换到规则规划器。`/health` 会返回配置模式、实际运行模式、Provider 和启动回退原因。`POST /v1/query/plan` 可单独查看分析、改写和策略选择，不会执行向量或关键词检索。
 
 当前支持的检索执行策略：
 

@@ -7,13 +7,16 @@ from time import time
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class QueryType(str, Enum):
+    EXACT_MATCH = "exact_match"
     FACT_LOOKUP = "fact_lookup"
     SEMANTIC_QUESTION = "semantic_question"
     FILTERED_SEARCH = "filtered_search"
+    COMPARISON = "comparison"
+    MULTI_HOP = "multi_hop"
     CONVERSATION_FOLLOWUP = "conversation_followup"
     AMBIGUOUS = "ambiguous"
 
@@ -43,16 +46,99 @@ class Query(BaseModel):
     filters: dict[str, Any] = Field(default_factory=dict)
 
 
-class RetrievalPlan(BaseModel):
+class QueryAnalysis(BaseModel):
     query_type: QueryType
-    strategy: RetrievalStrategy = RetrievalStrategy.HYBRID
-    top_k: int = Field(default=8, ge=1, le=100)
-    rerank: bool = True
+    normalized_query: str = Field(min_length=1)
     rewrite_required: bool = False
     rewritten_queries: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
     filters: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class RetrievalDecision(BaseModel):
+    strategy: RetrievalStrategy = RetrievalStrategy.HYBRID
+    top_k: int = Field(default=8, ge=1, le=100)
+    rerank: bool = True
+    reason: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class RetrievalPlan(BaseModel):
+    """Structured planner result with compatibility for the original flat schema."""
+
+    analysis: QueryAnalysis
+    decision: RetrievalDecision
+    planner: str = "unknown"
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_flat_plan(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "analysis" in value:
+            return value
+        query_type = value.get("query_type", QueryType.AMBIGUOUS)
+        normalized_query = value.get("normalized_query") or value.get("original_query") or "unknown"
+        return {
+            "analysis": {
+                "query_type": query_type,
+                "normalized_query": normalized_query,
+                "rewrite_required": value.get("rewrite_required", False),
+                "rewritten_queries": value.get("rewritten_queries", []),
+                "keywords": value.get("keywords", []),
+                "filters": value.get("filters", {}),
+                "reason": value.get("analysis_reason", value.get("reason", "")),
+                "confidence": value.get("analysis_confidence", value.get("confidence", 0.0)),
+            },
+            "decision": {
+                "strategy": value.get("strategy", RetrievalStrategy.HYBRID),
+                "top_k": value.get("top_k", 8),
+                "rerank": value.get("rerank", True),
+                "reason": value.get("decision_reason", value.get("reason", "")),
+                "confidence": value.get("decision_confidence", value.get("confidence", 0.0)),
+            },
+            "planner": value.get("planner", "legacy"),
+            "fallback_used": value.get("fallback_used", False),
+            "fallback_reason": value.get("fallback_reason"),
+        }
+
+    @property
+    def query_type(self) -> QueryType:
+        return self.analysis.query_type
+
+    @property
+    def strategy(self) -> RetrievalStrategy:
+        return self.decision.strategy
+
+    @property
+    def top_k(self) -> int:
+        return self.decision.top_k
+
+    @property
+    def rerank(self) -> bool:
+        return self.decision.rerank
+
+    @property
+    def rewrite_required(self) -> bool:
+        return self.analysis.rewrite_required
+
+    @property
+    def rewritten_queries(self) -> list[str]:
+        return self.analysis.rewritten_queries
+
+    @property
+    def filters(self) -> dict[str, Any]:
+        return self.analysis.filters
+
+    @property
+    def reason(self) -> str:
+        return self.decision.reason
+
+    @property
+    def confidence(self) -> float:
+        return self.decision.confidence
 
 
 class RetrievedChunk(BaseModel):
@@ -73,6 +159,7 @@ class RetrievalTrace(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     query: Query
     plan: RetrievalPlan | None = None
+    retrieval_queries: list[str] = Field(default_factory=list)
     candidates: list[RetrievedChunk] = Field(default_factory=list)
     final_context: list[RetrievedChunk] = Field(default_factory=list)
     steps: list[TraceStep] = Field(default_factory=list)

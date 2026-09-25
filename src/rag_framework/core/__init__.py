@@ -1,3 +1,17 @@
-from .models import Document, Query, RetrievalPlan, RetrievalTrace
+from .models import (
+    Document,
+    Query,
+    QueryAnalysis,
+    RetrievalDecision,
+    RetrievalPlan,
+    RetrievalTrace,
+)
 
-__all__ = ["Document", "Query", "RetrievalPlan", "RetrievalTrace"]
+__all__ = [
+    "Document",
+    "Query",
+    "QueryAnalysis",
+    "RetrievalDecision",
+    "RetrievalPlan",
+    "RetrievalTrace",
+]

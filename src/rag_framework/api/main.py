@@ -9,13 +9,13 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from rag_framework.config import settings
-from rag_framework.core.models import Document, Query, RetrievalTrace
+from rag_framework.core.models import Document, Query, RetrievalPlan, RetrievalTrace
 from rag_framework.pipeline.indexing import CharacterChunker, IndexingPipeline
 from rag_framework.pipeline.retrieval import AdaptiveRetriever
 from rag_framework.providers import (
     ChromaVectorStore,
     HashEmbedder,
-    HeuristicQueryRouter,
+    build_query_planner,
     create_keyword_store,
 )
 
@@ -32,11 +32,12 @@ class IndexDocumentsResponse(BaseModel):
 vector_store = ChromaVectorStore(settings.chroma_directory, settings.chroma_collection)
 keyword_store = create_keyword_store(settings)
 embedder = HashEmbedder(settings.embedding_dimensions)
+planner_runtime = build_query_planner(settings)
 indexing_pipeline = IndexingPipeline(CharacterChunker(), embedder, vector_store, keyword_store)
 retriever = AdaptiveRetriever(
     vector_store,
     embedder,
-    HeuristicQueryRouter(),
+    planner_runtime.planner,
     keyword_store,
     hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,
     rrf_rank_constant=settings.rrf_rank_constant,
@@ -67,6 +68,13 @@ async def health() -> dict[str, Any]:
         "configured_keyword_backend": settings.keyword_backend,
         "active_keyword_store": type(keyword_store).__name__,
         "keyword_primary_healthy": primary_healthy,
+        "configured_query_planner_mode": planner_runtime.configured_mode,
+        "active_query_planner_mode": planner_runtime.active_mode,
+        "query_planner_provider": planner_runtime.provider,
+        "query_planner_model": (
+            settings.planner_model if planner_runtime.active_mode == "llm" else None
+        ),
+        "query_planner_fallback_reason": planner_runtime.fallback_reason,
     }
 
 
@@ -79,3 +87,10 @@ async def index_documents(request: IndexDocumentsRequest) -> IndexDocumentsRespo
 @app.post("/v1/retrieve", response_model=RetrievalTrace)
 async def retrieve(query: Query) -> RetrievalTrace:
     return await retriever.retrieve(query)
+
+
+@app.post("/v1/query/plan", response_model=RetrievalPlan)
+async def plan_query(query: Query) -> RetrievalPlan:
+    """Inspect query analysis and strategy selection without running retrieval."""
+
+    return await planner_runtime.planner.plan(query)

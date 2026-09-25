@@ -9,7 +9,7 @@ from time import perf_counter
 from rag_framework.contracts.providers import (
     Embedder,
     KeywordStore,
-    QueryRouter,
+    QueryPlanner,
     Reranker,
     VectorStore,
 )
@@ -27,7 +27,7 @@ class AdaptiveRetriever:
         self,
         vector_store: VectorStore,
         embedder: Embedder,
-        router: QueryRouter,
+        router: QueryPlanner,
         keyword_store: KeywordStore | None = None,
         reranker: Reranker | None = None,
         hybrid_candidate_multiplier: int = 2,
@@ -39,7 +39,7 @@ class AdaptiveRetriever:
             raise ValueError("rrf_rank_constant must be non-negative")
         self.vector_store = vector_store
         self.embedder = embedder
-        self.router = router
+        self.planner = router
         self.keyword_store = keyword_store
         self.reranker = reranker
         self.hybrid_candidate_multiplier = hybrid_candidate_multiplier
@@ -48,16 +48,38 @@ class AdaptiveRetriever:
     async def retrieve(self, query: Query) -> RetrievalTrace:
         trace = RetrievalTrace(query=query)
         started = perf_counter()
-        plan = await self.router.plan(query)
+        plan = await self.planner.plan(query)
         trace.plan = plan
-        trace.add_step("route_query", (perf_counter() - started) * 1000, plan=plan.model_dump())
+        trace.add_step(
+            "analyze_query",
+            (perf_counter() - started) * 1000,
+            analysis=plan.analysis.model_dump(),
+            planner=plan.planner,
+            fallback_used=plan.fallback_used,
+            fallback_reason=plan.fallback_reason,
+        )
 
         retrieval_queries = (
             [query.text, *plan.rewritten_queries] if plan.rewrite_required else [query.text]
         )
-        filters = {**query.filters, **plan.filters}
+        trace.retrieval_queries = list(dict.fromkeys(retrieval_queries))
+        if plan.rewrite_required:
+            trace.add_step(
+                "rewrite_query",
+                0,
+                original_query=query.text,
+                rewritten_queries=plan.rewritten_queries,
+                effective_queries=trace.retrieval_queries,
+            )
+        trace.add_step(
+            "select_retrieval_strategy",
+            0,
+            decision=plan.decision.model_dump(),
+        )
+        # Explicit caller filters are authoritative even when a custom planner proposes filters.
+        filters = {**plan.filters, **query.filters}
         candidates: dict[str, RetrievedChunk] = {}
-        for retrieval_query in dict.fromkeys(retrieval_queries):
+        for retrieval_query in trace.retrieval_queries:
             results = await self._execute_strategy(
                 strategy=plan.strategy,
                 query=retrieval_query,

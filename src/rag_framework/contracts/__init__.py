@@ -1,6 +1,7 @@
 from .providers import (
     Embedder,
     KeywordStore,
+    QueryPlanner,
     QueryRouter,
     Reranker,
     StructuredOutputLLM,
@@ -10,6 +11,7 @@ from .providers import (
 __all__ = [
     "Embedder",
     "KeywordStore",
+    "QueryPlanner",
     "QueryRouter",
     "Reranker",
     "StructuredOutputLLM",

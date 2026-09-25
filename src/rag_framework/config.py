@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     chroma_collection: str = "documents"
     embedding_dimensions: int = 384
     default_top_k: int = 8
+    query_planner_mode: Literal["heuristic", "llm", "auto"] = "auto"
+    planner_model: str = "gpt-4o-mini"
+    planner_api_key: SecretStr | None = None
+    planner_base_url: str | None = None
+    planner_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    planner_request_timeout: float = Field(default=30.0, gt=0)
+    planner_max_retries: int = Field(default=2, ge=0)
+    planner_minimum_confidence: float = Field(default=0.55, ge=0.0, le=1.0)
+    planner_max_rewrites: int = Field(default=4, ge=0, le=10)
     hybrid_candidate_multiplier: int = Field(default=2, ge=1)
     rrf_rank_constant: int = Field(default=60, ge=0)
     keyword_backend: Literal["memory", "elasticsearch"] = "memory"

@@ -40,9 +40,13 @@ class Reranker(ABC):
     async def rerank(self, query: str, candidates: list[RetrievedChunk]) -> list[RetrievedChunk]: ...
 
 
-class QueryRouter(ABC):
+class QueryPlanner(ABC):
     @abstractmethod
     async def plan(self, query: Query) -> RetrievalPlan: ...
+
+
+# Backwards-compatible name for integrations built against the first release.
+QueryRouter = QueryPlanner
 
 
 class StructuredOutputLLM(ABC):
