@@ -9,6 +9,7 @@ from langchain_core.documents import Document as LangChainDocument
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel
 
 from rag_framework.contracts.providers import Embedder, StructuredOutputLLM
 from rag_framework.core.models import Document, RetrievalPlan
@@ -60,14 +61,19 @@ class LangChainDocumentAdapter:
 class LangChainStructuredOutputLLM(StructuredOutputLLM):
     """Uses a LangChain chat model's provider-native structured-output facility."""
 
-    def __init__(self, chat_model: BaseChatModel) -> None:
-        self._planner = chat_model.with_structured_output(RetrievalPlan)
+    def __init__(
+        self,
+        chat_model: BaseChatModel,
+        *,
+        schema: type[BaseModel] = RetrievalPlan,
+    ) -> None:
+        self._structured_model = chat_model.with_structured_output(schema)
 
     async def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, object]:
-        result = await self._planner.ainvoke(
+        result = await self._structured_model.ainvoke(
             [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
         )
-        if isinstance(result, RetrievalPlan):
+        if isinstance(result, BaseModel):
             return result.model_dump()
         if isinstance(result, dict):
             return result

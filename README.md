@@ -130,3 +130,121 @@ Elasticsearch 写入使用异步 Bulk 和 `refresh=wait_for`。每次入库同�
 RAG_HYBRID_CANDIDATE_MULTIPLIER=2
 RAG_RRF_RANK_CONSTANT=60
 ```
+
+## 检索评估
+
+`POST /v1/evaluations/retrieval` 使用标注了相关 chunk 的测试集运行当前真实检索链路，
+并同时计算重排前 `candidates` 与重排后 `final_context` 的指标：Hit Rate、
+Precision@K、Recall@K、MRR 和 NDCG@K。报告中的 `delta` 为重排后减去重排前，
+因此负值表示该指标发生退化；报告总指标是所有成功样例的宏平均值。
+
+```json
+{
+  "k": 5,
+  "include_trace": false,
+  "cases": [
+    {
+      "id": "tokyo-tower-height",
+      "query": {"text": "东京塔有多高？"},
+      "relevant_chunk_ids": ["tokyo-tower-001"],
+      "metadata": {"dataset": "smoke-test"}
+    }
+  ]
+}
+```
+
+批量评估会限制并发，单个检索失败不会中止整批任务。设置 `include_trace=true`
+可在每个样例结果中保留完整 Trace；默认关闭以减小报告体积。报告以 JSON 文件持久化，
+超过上限时自动移除最早的报告：
+
+```env
+RAG_EVALUATION_CONCURRENCY=4
+RAG_EVALUATION_REPORT_LIMIT=100
+RAG_EVALUATION_REPORT_DIRECTORY=data/evaluation/reports
+```
+
+- `GET /v1/evaluations`：按新到旧列出报告摘要。
+- `GET /v1/evaluations/{report_id}`：读取包含逐样例结果的完整报告。
+
+### JSONL 测试集
+
+测试集采用一行一个 `EvaluationCase` 的 JSONL 格式。`query` 既可以是完整 Query 对象，
+也可以直接使用字符串简写；导出时统一写成完整对象：
+
+```jsonl
+{"id":"case-1","query":"东京塔有多高？","relevant_chunk_ids":["tokyo-tower-001"]}
+{"id":"case-2","query":{"text":"浅草寺在哪里？","filters":{"city":"东京"}},"relevant_chunk_ids":["sensoji-001"],"metadata":{"category":"location"}}
+```
+
+导入时使用 UTF-8 编码的 `application/x-ndjson` 请求体，`name` 和 `description`
+作为查询参数传入。测试集和报告均默认保存在 `data/evaluation/`，该目录不会提交到 Git：
+
+```env
+RAG_EVALUATION_DATASET_DIRECTORY=data/evaluation/datasets
+RAG_EVALUATION_DATASET_MAX_CASES=10000
+RAG_EVALUATION_DATASET_MAX_BYTES=5000000
+```
+
+- `POST /v1/evaluation-datasets/import?name=Tokyo%20QA`：导入 JSONL 测试集。
+- `GET /v1/evaluation-datasets`：列出测试集摘要。
+- `GET /v1/evaluation-datasets/{dataset_id}`：读取完整测试集。
+- `GET /v1/evaluation-datasets/{dataset_id}/export`：导出标准 JSONL。
+- `POST /v1/evaluations/retrieval/datasets/{dataset_id}`：基于已保存测试集运行评估。
+
+### 端到端 RAG 评估
+
+`POST /v1/evaluations/rag` 会为每个样例执行一次完整的检索与回答生成，并在同一报告中返回
+重排前后检索指标和以下回答质量指标：
+
+- `groundedness`：回答词元被生成阶段实际上下文覆盖的比例。
+- `answer_relevancy`：问题与回答词元集合的 F1 相似度。
+- `citation_validity`：回答中指向有效上下文编号的引用比例。
+- `citation_correctness`：引用内容是否真正支撑其对应回答陈述。
+- `citation_precision`：被引用 chunk 中属于标注相关 chunk 的比例。
+- `citation_recall`：标注相关 chunk 中被回答引用的比例。
+- `reference_similarity`：存在 `reference_answer` 时，回答与参考答案的 F1 相似度。
+
+```json
+{
+  "k": 5,
+  "include_trace": false,
+  "cases": [
+    {
+      "query": {"text": "东京塔有多高？"},
+      "relevant_chunk_ids": ["tokyo-tower-001"],
+      "reference_answer": "东京塔高333米。"
+    }
+  ]
+}
+```
+
+回答评估支持 `heuristic`、`llm` 和 `auto` 三种裁判模式。`heuristic_v1` 完全在本地计算，
+没有额外模型费用且结果可复现，适合持续集成和快速回归。`llm_judge_v1` 使用结构化
+LLM 输出评估 groundedness、answer relevancy、citation correctness 和参考答案语义一致性；
+引用编号有效性、标注 chunk 命中率等可精确计算的指标仍由本地计算。
+
+```env
+RAG_EVALUATION_JUDGE_MODE=auto
+# 未设置时依次复用回答生成和 Planner 的模型、密钥与 Base URL。
+# RAG_EVALUATION_JUDGE_MODEL=qwen-plus
+# RAG_EVALUATION_JUDGE_API_KEY=your-api-key
+# RAG_EVALUATION_JUDGE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+RAG_EVALUATION_JUDGE_TEMPERATURE=0
+RAG_EVALUATION_JUDGE_REQUEST_TIMEOUT=60
+RAG_EVALUATION_JUDGE_MAX_RETRIES=2
+RAG_EVALUATION_JUDGE_MAX_TOKENS=1024
+RAG_EVALUATION_JUDGE_MAX_CONTEXT_CHARACTERS=12000
+```
+
+`llm` 是严格模式，凭据缺失会阻止启动，调用或结构化输出失败会将对应样例标记为失败。
+`auto` 优先使用 LLM，初始化失败时切换成本地裁判；运行时失败则逐样例回退，并通过
+`fallback_used` 和 `fallback_reason` 记录回退。`heuristic` 始终使用本地指标，也是默认模式，
+避免评估任务在未明确配置时产生额外模型费用。报告中的 `judge_rationale` 只保存简短结论，
+不要求也不保存模型的思维链。
+
+真实 Provider 烟雾测试默认跳过，显式设置 `RAG_RUN_LIVE_JUDGE=1` 后执行测试即可验证
+当前 `.env` 中配置的模型是否支持结构化裁判输出。
+
+- `POST /v1/evaluations/rag`：直接提交样例并运行端到端评估。
+- `POST /v1/evaluations/rag/datasets/{dataset_id}`：使用持久化测试集运行端到端评估。
+- `GET /v1/evaluations`：统一列出 `retrieval` 与 `rag` 两类实验报告。
