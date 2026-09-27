@@ -24,12 +24,18 @@ class FakeIndices:
     def __init__(self, exists: bool = False) -> None:
         self.exists_result = exists
         self.created: list[dict[str, Any]] = []
+        self.deleted: list[str] = []
 
     async def exists(self, *, index: str) -> bool:
         return self.exists_result
 
     async def create(self, **kwargs: Any) -> None:
         self.created.append(kwargs)
+        self.exists_result = True
+
+    async def delete(self, *, index: str) -> None:
+        self.deleted.append(index)
+        self.exists_result = False
 
 
 class FakeElasticsearchClient:
@@ -61,6 +67,9 @@ class FakeElasticsearchClient:
 
     async def ping(self) -> bool:
         return True
+
+    async def count(self, *, index: str) -> dict[str, int]:
+        return {"count": 3}
 
     async def close(self) -> None:
         self.closed = True
@@ -117,6 +126,22 @@ async def test_elasticsearch_search_builds_filters_and_restores_chunk() -> None:
     assert results[0].chunk == make_chunk()
     assert results[0].source == "keyword:elasticsearch"
     assert results[0].component_scores["elasticsearch_bm25"] == 4.2
+
+
+@pytest.mark.asyncio
+async def test_elasticsearch_clear_deletes_only_configured_index() -> None:
+    client = FakeElasticsearchClient(index_exists=True)
+
+    async def unused_bulk_writer(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    store = ElasticsearchKeywordStore(
+        url="http://unused:9200", index_name="rag-test", client=client,
+        bulk_writer=unused_bulk_writer,
+    )
+    assert await store.clear() == 3
+    assert client.indices.deleted == ["rag-test"]
+    assert await store.count() == 0
 
 
 class FailingKeywordStore(KeywordStore):

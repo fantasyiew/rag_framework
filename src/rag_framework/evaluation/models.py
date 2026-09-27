@@ -29,18 +29,21 @@ class EvaluationCase(BaseModel):
 
 class RetrievalEvaluationRequest(BaseModel):
     cases: list[EvaluationCase] = Field(min_length=1)
+    knowledge_base_id: str = Field(default="default", min_length=1, max_length=64)
     k: int = Field(default=5, ge=1, le=100)
     include_trace: bool = False
     dataset_id: str | None = None
 
 
 class DatasetEvaluationRequest(BaseModel):
+    knowledge_base_id: str = Field(default="default", min_length=1, max_length=64)
     k: int = Field(default=5, ge=1, le=100)
     include_trace: bool = False
 
 
 class RAGEvaluationRequest(BaseModel):
     cases: list[EvaluationCase] = Field(min_length=1)
+    knowledge_base_id: str = Field(default="default", min_length=1, max_length=64)
     k: int = Field(default=5, ge=1, le=100)
     include_trace: bool = False
     dataset_id: str | None = None

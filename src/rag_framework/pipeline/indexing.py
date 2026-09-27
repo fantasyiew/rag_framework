@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from rag_framework.contracts.providers import Embedder, KeywordStore, VectorStore
@@ -23,11 +25,12 @@ class CharacterChunker:
         parts = self._splitter.split_text(document.content.strip())
         return [
             Chunk(
+                id=sha256(f'{document.id}:{index}:{content}'.encode()).hexdigest(),
                 document_id=document.id,
                 index=index,
                 content=content,
                 source_uri=document.source_uri,
-                metadata=document.metadata,
+                metadata={k: v for k, v in document.metadata.items() if k != 'raw_metadata'},
             )
             for index, content in enumerate(parts)
         ]

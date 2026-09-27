@@ -7,6 +7,8 @@ __pycache__/
 .mypy_cache/
 .idea/
 data/chroma/
+data/sources/
 data/evaluation/
+data/knowledge_bases/
 frontend/node_modules/
 frontend/dist/

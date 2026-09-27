@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi import Query as QueryParameter
 from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from rag_framework.config import settings
@@ -29,6 +31,11 @@ from rag_framework.evaluation import (
     RetrievalEvaluationRequest,
     RetrievalEvaluator,
 )
+from rag_framework.knowledge_bases import (
+    KnowledgeBaseManager,
+    KnowledgeBaseRuntime,
+    knowledge_base_router,
+)
 from rag_framework.pipeline.generation import GenerationPipeline
 from rag_framework.pipeline.indexing import CharacterChunker, IndexingPipeline
 from rag_framework.pipeline.retrieval import AdaptiveRetriever
@@ -41,10 +48,13 @@ from rag_framework.providers import (
     build_reranker,
     create_keyword_store,
 )
+from rag_framework.sources.api import source_router
+from rag_framework.sources.service import SourceService
 
 
 class IndexDocumentsRequest(BaseModel):
     documents: list[Document] = Field(min_length=1)
+    knowledge_base_id: str = Field(default="default", min_length=1, max_length=64)
 
 
 class IndexDocumentsResponse(BaseModel):
@@ -76,6 +86,57 @@ generation_pipeline = GenerationPipeline(
     generator_runtime.generator,
     max_context_chunks=settings.generation_max_context_chunks,
 )
+default_source_service = SourceService(Path("data/sources"), indexing_pipeline)
+default_runtime = KnowledgeBaseRuntime(
+    vector_store=vector_store,
+    keyword_store=keyword_store,
+    indexing_pipeline=indexing_pipeline,
+    retriever=retriever,
+    generation_pipeline=generation_pipeline,
+    sources=default_source_service,
+)
+
+
+def build_knowledge_base_runtime(knowledge_base_id: str) -> KnowledgeBaseRuntime:
+    collection = f"{settings.chroma_collection}_{knowledge_base_id}"
+    index_name = f"{settings.elasticsearch_index}_{knowledge_base_id}"
+    runtime_vector_store = ChromaVectorStore(settings.chroma_directory, collection)
+    runtime_keyword_store = create_keyword_store(settings, index_name=index_name)
+    runtime_indexing = IndexingPipeline(
+        CharacterChunker(), embedder, runtime_vector_store, runtime_keyword_store
+    )
+    runtime_retriever = AdaptiveRetriever(
+        runtime_vector_store,
+        embedder,
+        planner_runtime.planner,
+        runtime_keyword_store,
+        reranker=reranker,
+        reranker_candidate_k=settings.reranker_candidate_k,
+        reranker_fail_open=settings.reranker_mode == "auto",
+        hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,
+        rrf_rank_constant=settings.rrf_rank_constant,
+    )
+    runtime_generation = GenerationPipeline(
+        runtime_retriever,
+        generator_runtime.generator,
+        max_context_chunks=settings.generation_max_context_chunks,
+    )
+    runtime_sources = SourceService(
+        Path("data/knowledge_bases") / knowledge_base_id / "sources", runtime_indexing
+    )
+    return KnowledgeBaseRuntime(
+        vector_store=runtime_vector_store,
+        keyword_store=runtime_keyword_store,
+        indexing_pipeline=runtime_indexing,
+        retriever=runtime_retriever,
+        generation_pipeline=runtime_generation,
+        sources=runtime_sources,
+    )
+
+
+knowledge_bases = KnowledgeBaseManager(
+    Path("data/knowledge_bases"), default_runtime, build_knowledge_base_runtime
+)
 evaluation_store = EvaluationStore(
     limit=settings.evaluation_report_limit,
     directory=settings.evaluation_report_directory,
@@ -100,9 +161,7 @@ rag_evaluator = RAGEvaluator(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    close = getattr(keyword_store, "close", None)
-    if close is not None:
-        await close()
+    await knowledge_bases.close()
     close_reranker = getattr(reranker, "close", None)
     if close_reranker is not None:
         await close_reranker()
@@ -153,13 +212,21 @@ async def health() -> dict[str, Any]:
 
 @app.post("/v1/index/documents", response_model=IndexDocumentsResponse)
 async def index_documents(request: IndexDocumentsRequest) -> IndexDocumentsResponse:
-    chunks = await indexing_pipeline.index(request.documents)
+    try:
+        pipeline = knowledge_bases.runtime(request.knowledge_base_id).indexing_pipeline
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+    chunks = await pipeline.index(request.documents)
     return IndexDocumentsResponse(indexed_documents=len(request.documents), indexed_chunks=len(chunks))
 
 
 @app.post("/v1/retrieve", response_model=RetrievalTrace)
 async def retrieve(query: Query) -> RetrievalTrace:
-    return await retriever.retrieve(query)
+    try:
+        runtime = knowledge_bases.runtime(query.knowledge_base_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+    return await runtime.retriever.retrieve(query)
 
 
 @app.post("/v1/evaluations/retrieval", response_model=RetrievalEvaluationReport)
@@ -168,7 +235,14 @@ async def evaluate_retrieval(
 ) -> RetrievalEvaluationReport:
     """Run a labelled retrieval dataset through the active retrieval pipeline."""
 
-    return await retrieval_evaluator.evaluate(request)
+    try:
+        active_retriever = knowledge_bases.runtime(request.knowledge_base_id).retriever
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+    evaluator = retrieval_evaluator if request.knowledge_base_id == "default" else RetrievalEvaluator(
+        active_retriever, evaluation_store, concurrency=settings.evaluation_concurrency
+    )
+    return await evaluator.evaluate(request)
 
 
 @app.post(
@@ -182,9 +256,17 @@ async def evaluate_retrieval_dataset(
     dataset = evaluation_dataset_store.get(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Evaluation dataset not found")
-    return await retrieval_evaluator.evaluate(
+    try:
+        active_retriever = knowledge_bases.runtime(request.knowledge_base_id).retriever
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+    evaluator = retrieval_evaluator if request.knowledge_base_id == "default" else RetrievalEvaluator(
+        active_retriever, evaluation_store, concurrency=settings.evaluation_concurrency
+    )
+    return await evaluator.evaluate(
         RetrievalEvaluationRequest(
             cases=dataset.cases,
+            knowledge_base_id=request.knowledge_base_id,
             k=request.k,
             include_trace=request.include_trace,
             dataset_id=dataset.id,
@@ -196,7 +278,17 @@ async def evaluate_retrieval_dataset(
 async def evaluate_rag(request: RAGEvaluationRequest) -> RAGEvaluationReport:
     """Run retrieval and answer generation, then score both stages."""
 
-    return await rag_evaluator.evaluate(request)
+    try:
+        active_generation = knowledge_bases.runtime(request.knowledge_base_id).generation_pipeline
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+    evaluator = rag_evaluator if request.knowledge_base_id == "default" else RAGEvaluator(
+        active_generation,
+        evaluation_store,
+        concurrency=settings.evaluation_concurrency,
+        judge=judge_runtime.judge,
+    )
+    return await evaluator.evaluate(request)
 
 
 @app.post(
@@ -210,9 +302,20 @@ async def evaluate_rag_dataset(
     dataset = evaluation_dataset_store.get(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Evaluation dataset not found")
-    return await rag_evaluator.evaluate(
+    try:
+        active_generation = knowledge_bases.runtime(request.knowledge_base_id).generation_pipeline
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+    evaluator = rag_evaluator if request.knowledge_base_id == "default" else RAGEvaluator(
+        active_generation,
+        evaluation_store,
+        concurrency=settings.evaluation_concurrency,
+        judge=judge_runtime.judge,
+    )
+    return await evaluator.evaluate(
         RAGEvaluationRequest(
             cases=dataset.cases,
+            knowledge_base_id=request.knowledge_base_id,
             k=request.k,
             include_trace=request.include_trace,
             dataset_id=dataset.id,
@@ -292,14 +395,23 @@ async def plan_query(query: Query) -> RetrievalPlan:
 
 @app.post("/v1/chat", response_model=RAGResponse)
 async def chat(query: Query) -> RAGResponse:
-    return await generation_pipeline.run(query)
+    try:
+        runtime = knowledge_bases.runtime(query.knowledge_base_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+    return await runtime.generation_pipeline.run(query)
 
 
 @app.post("/v1/chat/stream")
 async def stream_chat(query: Query) -> StreamingResponse:
+    try:
+        runtime = knowledge_bases.runtime(query.knowledge_base_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+
     async def events():
         try:
-            async for event in generation_pipeline.stream(query):
+            async for event in runtime.generation_pipeline.stream(query):
                 payload = json.dumps(event.data, ensure_ascii=False, default=str)
                 yield f"event: {event.type}\ndata: {payload}\n\n"
         except Exception as exc:  # noqa: BLE001 - Convert provider failure to a terminal SSE event.
@@ -309,3 +421,10 @@ async def stream_chat(query: Query) -> StreamingResponse:
             yield f"event: error\ndata: {payload}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+app.include_router(source_router(default_source_service))
+app.include_router(knowledge_base_router(knowledge_bases))
+
+# Registered last so the console never shadows API routes.
+app.mount("/", StaticFiles(directory=Path(__file__).parents[1] / "web", html=True), name="console")

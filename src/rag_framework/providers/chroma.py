@@ -48,6 +48,19 @@ class ChromaVectorStore(VectorStore):
         )
         return self._to_results(result)
 
+    async def clear(self) -> int:
+        return await asyncio.to_thread(self._clear_sync)
+
+    def _clear_sync(self) -> int:
+        result = self._collection.get(include=[])
+        ids = result.get("ids", [])
+        if ids:
+            self._collection.delete(ids=ids)
+        return len(ids)
+
+    async def count(self) -> int:
+        return await asyncio.to_thread(self._collection.count)
+
     @staticmethod
     def _metadata(chunk: Chunk) -> dict[str, Any]:
         metadata = {key: value for key, value in chunk.metadata.items() if isinstance(value, (str, int, float, bool))}

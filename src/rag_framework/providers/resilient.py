@@ -41,6 +41,20 @@ class ResilientKeywordStore(KeywordStore):
         health = getattr(self.primary, "health", None)
         return bool(await health()) if health is not None else True
 
+    async def clear(self) -> int:
+        fallback_count = await self.fallback.clear()
+        primary_count = await self.primary.clear()
+        return max(fallback_count, primary_count)
+
+    async def count(self) -> int:
+        count = getattr(self.primary, "count", None)
+        if count is not None:
+            try:
+                return int(await count())
+            except Exception:
+                logger.exception("Primary keyword count failed; using in-memory fallback")
+        return int(await self.fallback.count())
+
     async def close(self) -> None:
         close = getattr(self.primary, "close", None)
         if close is not None:

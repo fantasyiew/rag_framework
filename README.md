@@ -1,5 +1,54 @@
 # RAG Framework
 
+## 数据源适配与文档目录
+
+控制台「知识源」支持 TXT/Markdown（UTF-8）、平面 JSON 对象或对象数组、DOCX。
+JSON 字段可使用标量或一维标量数组；对象、对象数组、嵌套数组暂不支持。
+流程是上传原始文件、检查结构、选择 JSON 正文字段、预览 Document、确认入库。
+未选 JSON 字段完整保存在 Document.metadata.raw_metadata；chunk 不复制该字典。
+DOCX 按标准 Heading1–Heading9 样式划分章节，保留标题路径、章节和正文块位置，
+表格按行及单元格分隔为文本。暂不支持 DOC、自定义标题样式映射、图片和 OCR。
+
+`SourceAdapter.inspect` / `documents` 为统一扩展接口，通过 `AdapterRegistry.register`
+注册新实现。适配器仅生成 Document，统一 IndexingPipeline 负责分块和索引。
+默认知识库的原始文件和 SQLite 目录位于 `data/sources/`；其他知识库位于
+`data/knowledge_bases/{id}/sources/`。目录保存每次上传的文件名、类型、大小、SHA-256、
+结构检查结果，以及入库参数、时间、状态和新增/跳过数量。
+
+新增接口：`POST /v1/sources?name=...&kind=text|json|docx`（原始文件请求体，10 MB 上限）、
+`POST /v1/sources/{id}/preview`、`POST /v1/sources/{id}/ingest`（JSON body 含 content_fields）、
+`GET /v1/sources`、`GET /v1/sources/documents`、`GET /v1/sources/runs`。
+
+新流程按规范 Document 内容及业务元数据生成稳定 ID，成功写入的重复文档跳过；
+失败后重试使用相同 chunk ID。上传历史保留独立记录，改名上传相同数据不会新增文档。
+UI 直接文本入库也使用此流程。旧 `/v1/index/documents` 是低层接口，不执行目录去重；
+已有旧索引不会自动迁移。当前写入采用单进程锁，记录列表尚未分页。
+
+## 知识库管理
+
+控制台可创建和切换知识库。默认库继续使用配置中的 Chroma collection 与
+Elasticsearch index；新增库使用带知识库 ID 的独立 collection、index 和来源目录。
+`Query.knowledge_base_id` 控制检索及回答所在的库，省略时使用 `default`。
+
+- `GET /v1/knowledge-bases`：列出知识库及来源、Document、向量和关键词 chunk 计数。
+- `POST /v1/knowledge-bases`：创建知识库，请求体为 `{"name":"产品文档"}`。
+- `POST /v1/knowledge-bases/{id}/clear`：删除 Document 与检索索引，保留原始文件和历史。
+- `POST /v1/knowledge-bases/{id}/rebuild`：按历史成功写入配置从原始文件重建。
+- `/v1/knowledge-bases/{id}/sources...`：在指定知识库中上传、预览和写入来源。
+
+清空属于派生数据重置，不删除来源文件；因此可审计且可恢复。服务仍是本机单进程版本，
+暂未实现删除知识库、并发分布式锁和记录分页。
+
+## 开发者控制台
+
+运行 `python -m uvicorn rag_framework.api.main:app --host 127.0.0.1 --port 8000`，
+浏览器访问 `http://127.0.0.1:8000/`。UI 静态资源随 Python 包提供，无需安装前端依赖。
+
+控制台包含问答/仅检索、文档入库、Query 分析与阶段耗时、候选与重排排名、JSONL 测试集
+导入导出、检索及端到端评估、历史报告详情。聊天目前使用完整响应接口；聊天记录仅保留在
+当前页面内存中，刷新后清空。评估使用服务器当前配置，并显示真实失败或回退信息。
+本版本面向本机开发，尚未提供身份认证，请将服务绑定到本机地址。
+
 ## 重排
 
 支持 `disabled`、`cross_encoder`、`cloud` 和 `auto`。`cloud` 使用云端服务且失败时报错；

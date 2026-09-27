@@ -1,0 +1,7 @@
+.chunk-link{padding:2px 5px;border:0;background:transparent;color:var(--green);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;text-decoration:underline;text-decoration-style:dotted;overflow-wrap:anywhere}
+.chunk-link:hover{background:#eaf0e9}
+.chunk-dialog{width:min(820px,calc(100vw - 32px));max-height:86vh;padding:0;border:1px solid var(--line);border-radius:12px;color:inherit;box-shadow:0 24px 70px #1d302640}
+.chunk-dialog::backdrop{background:#20312880;backdrop-filter:blur(2px)}
+.dialog-head{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:#f7f9f5;border-bottom:1px solid var(--line);z-index:1}
+.dialog-head h2{margin:0}.dialog-body{padding:20px;overflow:auto}.dialog-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.dialog-section{margin-top:20px}.dialog-section h3{font-size:13px}.dialog-content{white-space:pre-wrap;line-height:1.75;padding:14px;background:#f5f7f2;border-radius:6px;max-height:280px;overflow:auto}.dialog-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}.dialog-grid div{overflow-wrap:anywhere}.dialog-message{color:#7b867f;font-size:12px}
+@media(max-width:700px){.dialog-grid{grid-template-columns:1fr}.chunk-dialog{max-height:92vh}}

@@ -41,6 +41,7 @@ class Chunk(Document):
 
 class Query(BaseModel):
     text: str = Field(min_length=1)
+    knowledge_base_id: str = Field(default="default", min_length=1, max_length=64)
     conversation_id: str | None = None
     history: list[str] = Field(default_factory=list)
     filters: dict[str, Any] = Field(default_factory=dict)

@@ -11,7 +11,7 @@ from rag_framework.providers.resilient import ResilientKeywordStore
 logger = logging.getLogger(__name__)
 
 
-def create_keyword_store(config: Settings) -> KeywordStore:
+def create_keyword_store(config: Settings, *, index_name: str | None = None) -> KeywordStore:
     memory_store = InMemoryBM25KeywordStore()
     if config.keyword_backend == "memory":
         return memory_store
@@ -19,7 +19,7 @@ def create_keyword_store(config: Settings) -> KeywordStore:
     try:
         primary = ElasticsearchKeywordStore(
             url=config.elasticsearch_url,
-            index_name=config.elasticsearch_index,
+            index_name=index_name or config.elasticsearch_index,
             analyzer=config.elasticsearch_analyzer,
             bm25_k1=config.elasticsearch_bm25_k1,
             bm25_b=config.elasticsearch_bm25_b,

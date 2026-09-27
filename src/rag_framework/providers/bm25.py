@@ -49,6 +49,17 @@ class InMemoryBM25KeywordStore(KeywordStore):
     ) -> list[RetrievedChunk]:
         return await asyncio.to_thread(self._search_sync, query, top_k, filters)
 
+    async def clear(self) -> int:
+        with self._lock:
+            count = len(self._chunks)
+            self._chunks.clear()
+            self._tokens.clear()
+        return count
+
+    async def count(self) -> int:
+        with self._lock:
+            return len(self._chunks)
+
     def _search_sync(
         self, query: str, top_k: int, filters: dict[str, object]
     ) -> list[RetrievedChunk]:

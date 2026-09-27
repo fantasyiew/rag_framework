@@ -29,6 +29,9 @@ async def test_chroma_store_upserts_and_retrieves_chunk(tmp_path: Path) -> None:
     assert results[0].chunk.id == "chunk-1"
     assert results[0].chunk.document_id == "doc-1"
     assert results[0].chunk.metadata == {"team": "platform"}
+    assert await store.count() == 1
+    assert await store.clear() == 1
+    assert await store.count() == 0
 
 
 @pytest.mark.asyncio

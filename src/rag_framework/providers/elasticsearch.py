@@ -156,6 +156,26 @@ class ElasticsearchKeywordStore(KeywordStore):
         except Exception:  # noqa: BLE001 - Health checks convert provider failures to status.
             return False
 
+    async def clear(self) -> int:
+        exists = await self._client.indices.exists(index=self.index_name)
+        if not bool(exists):
+            self._initialized = False
+            return 0
+        response = await self._client.count(index=self.index_name)
+        body = response.body if hasattr(response, "body") else response
+        count = int(body.get("count", 0))
+        await self._client.indices.delete(index=self.index_name)
+        self._initialized = False
+        return count
+
+    async def count(self) -> int:
+        exists = await self._client.indices.exists(index=self.index_name)
+        if not bool(exists):
+            return 0
+        response = await self._client.count(index=self.index_name)
+        body = response.body if hasattr(response, "body") else response
+        return int(body.get("count", 0))
+
     async def close(self) -> None:
         if self._owns_client:
             await self._client.close()
