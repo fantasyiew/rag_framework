@@ -1,5 +1,15 @@
 # 实施进度
 
+## 2026-09-28 · P2 Preset 与脱敏审计
+
+- 状态：完成。
+- 改动：版本 1 JSON Preset、RAG_SERVICE_PRESET 加载、明确覆盖顺序、导出与校验 API、脱敏配置快照及稳定哈希。
+- 评估：完整检索/RAG 报告增加 config_snapshot 和 knowledge_base_id；旧报告默认字段兼容。
+- 安全：凭据只导出环境变量引用；拒绝含认证信息的 URL 导出；快照清理 URL 认证信息并移除已知凭据。
+- 验证：118 passed、4 skipped；覆盖往返、优先级、自定义密钥引用、非法版本/字段、URL 和密钥脱敏、报告快照。
+- 边界：不热更新、不写用户 .env、不执行真实 Provider 调用；config_hash 仅标识脱敏配置，不能保证模型输出完全相同。
+- 下一步：P3，优先 CSV 与结构化 Markdown Adapter。
+
 ## 2026-09-28 · P1 嵌入/向量工厂与索引安全
 
 - 状态：完成。

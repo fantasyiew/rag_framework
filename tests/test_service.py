@@ -25,6 +25,16 @@ async def test_runtime_isolates_knowledge_bases_and_closes_once(tmp_path):
     assert other.sources.directory != default.sources.directory
     assert default.retriever.planner is other.retriever.planner
     assert service.retrieval_evaluator(other_id).retriever is other.retriever
+    from rag_framework.evaluation import RetrievalEvaluationRequest
+    report = await service.retrieval_evaluator(other_id).evaluate(
+        RetrievalEvaluationRequest(
+            knowledge_base_id=other_id,
+            cases=[{"query": {"text": "nothing"}, "relevant_chunk_ids": ["missing"]}],
+        )
+    )
+    assert report.knowledge_base_id == other_id
+    assert report.config_snapshot["config_hash"] == service.audit_snapshot()["config_hash"]
+    assert service.evaluation_store.get(report.id).config_snapshot == report.config_snapshot
     close = AsyncMock()
     default.keyword_store.close = close
     await service.close()

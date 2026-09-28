@@ -104,12 +104,14 @@ class RetrievalEvaluator:
         store: EvaluationStore,
         *,
         concurrency: int = 4,
+        config_snapshot: dict | None = None,
     ) -> None:
         if concurrency < 1:
             raise ValueError("Evaluation concurrency must be positive")
         self.retriever = retriever
         self.store = store
         self.concurrency = concurrency
+        self.config_snapshot = config_snapshot
 
     async def evaluate(self, request: RetrievalEvaluationRequest) -> RetrievalEvaluationReport:
         started_at = time()
@@ -131,6 +133,8 @@ class RetrievalEvaluator:
             else "failed"
         )
         report = RetrievalEvaluationReport(
+            config_snapshot=self.config_snapshot,
+            knowledge_base_id=request.knowledge_base_id,
             status=status,
             k=request.k,
             case_count=len(results),

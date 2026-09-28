@@ -29,6 +29,7 @@ class RAGEvaluator:
         *,
         concurrency: int = 4,
         judge: AnswerJudge | None = None,
+        config_snapshot: dict | None = None,
     ) -> None:
         if concurrency < 1:
             raise ValueError("Evaluation concurrency must be positive")
@@ -36,6 +37,7 @@ class RAGEvaluator:
         self.store = store
         self.concurrency = concurrency
         self.judge = judge or HeuristicAnswerJudge()
+        self.config_snapshot = config_snapshot
 
     async def evaluate(self, request: RAGEvaluationRequest) -> RAGEvaluationReport:
         started_at = time()
@@ -67,6 +69,8 @@ class RAGEvaluator:
             if result.answer_metrics is not None
         ]
         report = RAGEvaluationReport(
+            config_snapshot=self.config_snapshot,
+            knowledge_base_id=request.knowledge_base_id,
             status=status,
             k=request.k,
             case_count=len(results),

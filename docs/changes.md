@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-09-28 · P2
+
+- 新增版本化 Preset 加载与导出，密钥使用系统环境变量引用。
+- 增加 /v1/config/preset、/v1/config/preset/validate、/v1/config/snapshot。
+- /health 增加配置哈希；完整评估报告保存脱敏快照和知识库 ID。
+- 增加 docs/presets.md，说明覆盖规则、导出约束和重启生效边界。
+
 ## 2026-09-28 · P1
 
 - 提交 P0-A/P0-B 基线：6f703a7。

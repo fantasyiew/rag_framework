@@ -1,5 +1,10 @@
 # RAG Framework
 
+P2 支持版本化 JSON Preset：通过 `RAG_SERVICE_PRESET` 加载；
+`GET /v1/config/preset` 导出，`POST /v1/config/preset/validate` 校验，
+`GET /v1/config/snapshot` 查看脱敏快照。评估报告保存配置快照与知识库 ID。
+覆盖规则和密钥引用详见 [Preset 使用说明](docs/presets.md)。
+
 P1 引入 `build_embedder()` / `build_vector_store()`。嵌入支持 `hash`、
 `compatible`（OpenAI-compatible HTTP 协议，可连接 DashScope 兼容接口）与 `auto`。
 远程模式需要独立配置 `RAG_EMBEDDING_MODEL/API_KEY/BASE_URL`，

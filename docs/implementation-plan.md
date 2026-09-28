@@ -2,7 +2,7 @@
 
 > 对应需求：`docs/iteration-requirements.md` v0.2.1  
 > 创建日期：2026-09-27  
-> 当前状态：P0-A、P0-B、P1 已完成，P2 待实施
+> 当前状态：P0-A、P0-B、P1、P2 已完成，P3 待实施
 
 ## 1. 实施目标
 
@@ -77,12 +77,12 @@ P0-A 基线与统一装配
 
 ### 任务
 
-- [ ] 定义版本化 Preset JSON schema。
-- [ ] 实现 Preset 加载、校验、导出和环境变量覆盖优先级。
-- [ ] API Key 只引用环境变量名，不写入 Preset、Trace、报告或日志。
-- [ ] `/health` 展示应用级组件的 configured/active/fallback。
-- [ ] 检索 Trace、ingestion run、IndexManifest 和评估报告分别保存其阶段相关配置。
-- [ ] 为配置快照增加稳定哈希，便于比较实验是否使用同一配置。
+- [x] 定义版本化 Preset JSON schema。
+- [x] 实现 Preset 加载、校验、导出和环境变量覆盖优先级。
+- [x] API Key 只引用环境变量名，不写入 Preset、Trace、报告或日志。
+- [x] `/health` 展示应用级组件的 configured/active/fallback。
+- [x] 检索 Trace、ingestion run、IndexManifest 和评估报告分别保存其阶段相关配置。
+- [x] 为配置快照增加稳定哈希，便于比较实验是否使用同一配置。
 
 ### 验收门槛
 
@@ -138,4 +138,4 @@ P0-A 基线与统一装配
 
 ## 10. 下一步执行建议
 
-下一次实现从 P2 开始：定义版本化 Preset、配置覆盖优先级与脱敏快照。P1 的索引保护和失败恢复已完成，具体兼容边界见 index-safety.md。WeightedSum/RRS、额外 Provider 和 Adapter 仍在 P3。
+下一次实现从 P3 的 CSV 与结构化 Markdown Adapter 开始。Preset 格式与覆盖顺序见 presets.md，索引迁移规则见 index-safety.md。

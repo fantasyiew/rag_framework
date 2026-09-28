@@ -124,6 +124,8 @@ class EvaluationCaseResult(BaseModel):
 
 
 class RetrievalEvaluationReport(BaseModel):
+    config_snapshot: dict[str, Any] | None = None
+    knowledge_base_id: str = "default"
     kind: Literal["retrieval"] = "retrieval"
     id: str = Field(default_factory=lambda: str(uuid4()))
     status: Literal["complete", "partial", "failed"]
@@ -164,6 +166,8 @@ class RAGEvaluationCaseResult(BaseModel):
 
 
 class RAGEvaluationReport(BaseModel):
+    config_snapshot: dict[str, Any] | None = None
+    knowledge_base_id: str = "default"
     kind: Literal["rag"] = "rag"
     id: str = Field(default_factory=lambda: str(uuid4()))
     status: Literal["complete", "partial", "failed"]

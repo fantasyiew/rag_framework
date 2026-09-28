@@ -18,6 +18,7 @@ from rag_framework.knowledge_bases import (
 )
 from rag_framework.pipeline.generation import GenerationPipeline
 from rag_framework.pipeline.managed import ManagedIndexingPipeline, ManagedRetriever
+from rag_framework.presets import config_snapshot
 from rag_framework.providers import (
     build_answer_generator,
     build_answer_judge,
@@ -54,10 +55,20 @@ class ServiceRuntime:
     embedder: Any = None
     _closed: bool = False
 
+    def audit_snapshot(self):
+        snapshot = config_snapshot(self.settings)
+        snapshot["components"] = {
+            name: {"configured": info.configured, "active": info.active,
+                   "implementation": info.implementation}
+            for name, info in self.components.items()
+        }
+        return snapshot
+
     def retrieval_evaluator(self, knowledge_base_id: str = "default"):
         return RetrievalEvaluator(
             self.knowledge_bases.runtime(knowledge_base_id).retriever,
             self.evaluation_store, concurrency=self.settings.evaluation_concurrency,
+            config_snapshot=self.audit_snapshot(),
         )
 
     def rag_evaluator(self, knowledge_base_id: str = "default"):
@@ -65,6 +76,7 @@ class ServiceRuntime:
             self.knowledge_bases.runtime(knowledge_base_id).generation_pipeline,
             self.evaluation_store, concurrency=self.settings.evaluation_concurrency,
             judge=self.judge_runtime.judge,
+            config_snapshot=self.audit_snapshot(),
         )
 
     async def close(self):

@@ -9,6 +9,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="RAG_", extra="ignore")
+    service_preset: Path | None = None
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
+                                   dotenv_settings, file_secret_settings):
+        from rag_framework.presets import preset_source
+        return (
+            init_settings, env_settings, dotenv_settings,
+            lambda: preset_source(settings_cls, init_settings, env_settings, dotenv_settings),
+            file_secret_settings,
+        )
 
     chroma_directory: Path = Path("data/chroma")
     chroma_collection: str = "documents"

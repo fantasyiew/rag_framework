@@ -30,6 +30,7 @@ from rag_framework.evaluation import (
 )
 from rag_framework.index_state import IndexCompatibilityError
 from rag_framework.knowledge_bases import knowledge_base_router
+from rag_framework.presets import Preset, config_snapshot, export_preset, validate_preset
 from rag_framework.service import build_service
 from rag_framework.sources.api import source_router
 
@@ -82,12 +83,37 @@ async def index_compatibility_error(request: Request, exc: IndexCompatibilityErr
     return JSONResponse(status_code=409, content={"detail": str(exc), "code": "index_incompatible"})
 
 
+@app.get("/v1/config/snapshot")
+async def get_config_snapshot():
+    return service.audit_snapshot()
+
+
+@app.get("/v1/config/preset", response_model=Preset)
+async def get_config_preset():
+    try:
+        return export_preset(settings)
+    except ValueError as exc:
+        raise HTTPException(422, "Configuration contains sensitive values that cannot be exported") from exc
+
+
+@app.post("/v1/config/preset/validate")
+async def check_config_preset(preset: Preset):
+    try:
+        validate_preset(preset.model_dump(), type(settings).model_fields)
+        type(settings)(_env_file=None, **preset.settings)
+    except ValueError as exc:
+        raise HTTPException(422, "Invalid preset configuration") from exc
+    return {"valid": True, "schema_version": preset.schema_version,
+            "activation": "Save JSON and set RAG_SERVICE_PRESET, then restart"}
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     health_check = getattr(keyword_store, "health", None)
     primary_healthy = bool(await health_check()) if health_check is not None else True
     index_status = await default_runtime.index_state.describe()
     return {
+        "config_hash": config_snapshot(settings)["config_hash"],
         "components": {name: asdict(info) for name, info in service.components.items()},
         "status": "healthy" if primary_healthy and index_status["status"] in {"ready", "empty"} else "degraded",
         "index": index_status,
