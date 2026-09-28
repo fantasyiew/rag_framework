@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -20,36 +21,16 @@ from rag_framework.evaluation import (
     DatasetEvaluationRequest,
     DatasetFormatError,
     EvaluationDataset,
-    EvaluationDatasetStore,
     EvaluationDatasetSummary,
     EvaluationReport,
-    EvaluationStore,
     RAGEvaluationReport,
     RAGEvaluationRequest,
-    RAGEvaluator,
     RetrievalEvaluationReport,
     RetrievalEvaluationRequest,
-    RetrievalEvaluator,
 )
-from rag_framework.knowledge_bases import (
-    KnowledgeBaseManager,
-    KnowledgeBaseRuntime,
-    knowledge_base_router,
-)
-from rag_framework.pipeline.generation import GenerationPipeline
-from rag_framework.pipeline.indexing import CharacterChunker, IndexingPipeline
-from rag_framework.pipeline.retrieval import AdaptiveRetriever
-from rag_framework.providers import (
-    ChromaVectorStore,
-    HashEmbedder,
-    build_answer_generator,
-    build_answer_judge,
-    build_query_planner,
-    build_reranker,
-    create_keyword_store,
-)
+from rag_framework.knowledge_bases import knowledge_base_router
+from rag_framework.service import build_service
 from rag_framework.sources.api import source_router
-from rag_framework.sources.service import SourceService
 
 
 class IndexDocumentsRequest(BaseModel):
@@ -62,109 +43,25 @@ class IndexDocumentsResponse(BaseModel):
     indexed_chunks: int
 
 
-vector_store = ChromaVectorStore(settings.chroma_directory, settings.chroma_collection)
-keyword_store = create_keyword_store(settings)
-embedder = HashEmbedder(settings.embedding_dimensions)
-planner_runtime = build_query_planner(settings)
-generator_runtime = build_answer_generator(settings)
-judge_runtime = build_answer_judge(settings)
-reranker = build_reranker(settings)
-indexing_pipeline = IndexingPipeline(CharacterChunker(), embedder, vector_store, keyword_store)
-retriever = AdaptiveRetriever(
-    vector_store,
-    embedder,
-    planner_runtime.planner,
-    keyword_store,
-    reranker=reranker,
-    reranker_candidate_k=settings.reranker_candidate_k,
-    reranker_fail_open=settings.reranker_mode == "auto",
-    hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,
-    rrf_rank_constant=settings.rrf_rank_constant,
-)
-generation_pipeline = GenerationPipeline(
-    retriever,
-    generator_runtime.generator,
-    max_context_chunks=settings.generation_max_context_chunks,
-)
-default_source_service = SourceService(Path("data/sources"), indexing_pipeline)
-default_runtime = KnowledgeBaseRuntime(
-    vector_store=vector_store,
-    keyword_store=keyword_store,
-    indexing_pipeline=indexing_pipeline,
-    retriever=retriever,
-    generation_pipeline=generation_pipeline,
-    sources=default_source_service,
-)
-
-
-def build_knowledge_base_runtime(knowledge_base_id: str) -> KnowledgeBaseRuntime:
-    collection = f"{settings.chroma_collection}_{knowledge_base_id}"
-    index_name = f"{settings.elasticsearch_index}_{knowledge_base_id}"
-    runtime_vector_store = ChromaVectorStore(settings.chroma_directory, collection)
-    runtime_keyword_store = create_keyword_store(settings, index_name=index_name)
-    runtime_indexing = IndexingPipeline(
-        CharacterChunker(), embedder, runtime_vector_store, runtime_keyword_store
-    )
-    runtime_retriever = AdaptiveRetriever(
-        runtime_vector_store,
-        embedder,
-        planner_runtime.planner,
-        runtime_keyword_store,
-        reranker=reranker,
-        reranker_candidate_k=settings.reranker_candidate_k,
-        reranker_fail_open=settings.reranker_mode == "auto",
-        hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,
-        rrf_rank_constant=settings.rrf_rank_constant,
-    )
-    runtime_generation = GenerationPipeline(
-        runtime_retriever,
-        generator_runtime.generator,
-        max_context_chunks=settings.generation_max_context_chunks,
-    )
-    runtime_sources = SourceService(
-        Path("data/knowledge_bases") / knowledge_base_id / "sources", runtime_indexing
-    )
-    return KnowledgeBaseRuntime(
-        vector_store=runtime_vector_store,
-        keyword_store=runtime_keyword_store,
-        indexing_pipeline=runtime_indexing,
-        retriever=runtime_retriever,
-        generation_pipeline=runtime_generation,
-        sources=runtime_sources,
-    )
-
-
-knowledge_bases = KnowledgeBaseManager(
-    Path("data/knowledge_bases"), default_runtime, build_knowledge_base_runtime
-)
-evaluation_store = EvaluationStore(
-    limit=settings.evaluation_report_limit,
-    directory=settings.evaluation_report_directory,
-)
-evaluation_dataset_store = EvaluationDatasetStore(
-    settings.evaluation_dataset_directory,
-    max_cases=settings.evaluation_dataset_max_cases,
-)
-retrieval_evaluator = RetrievalEvaluator(
-    retriever,
-    evaluation_store,
-    concurrency=settings.evaluation_concurrency,
-)
-rag_evaluator = RAGEvaluator(
-    generation_pipeline,
-    evaluation_store,
-    concurrency=settings.evaluation_concurrency,
-    judge=judge_runtime.judge,
-)
+service = build_service(settings)
+knowledge_bases = service.knowledge_bases
+default_runtime = knowledge_bases.runtime("default")
+keyword_store = default_runtime.keyword_store
+default_source_service = default_runtime.sources
+planner_runtime = service.planner_runtime
+generator_runtime = service.generator_runtime
+judge_runtime = service.judge_runtime
+reranker = service.reranker
+evaluation_store = service.evaluation_store
+evaluation_dataset_store = service.evaluation_dataset_store
+retrieval_evaluator = service.retrieval_evaluator()
+rag_evaluator = service.rag_evaluator()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    await knowledge_bases.close()
-    close_reranker = getattr(reranker, "close", None)
-    if close_reranker is not None:
-        await close_reranker()
+    await service.close()
 
 app = FastAPI(
     title="RAG Framework API",
@@ -179,6 +76,7 @@ async def health() -> dict[str, Any]:
     health_check = getattr(keyword_store, "health", None)
     primary_healthy = bool(await health_check()) if health_check is not None else True
     return {
+        "components": {name: asdict(info) for name, info in service.components.items()},
         "status": "healthy" if primary_healthy else "degraded",
         "configured_keyword_backend": settings.keyword_backend,
         "active_keyword_store": type(keyword_store).__name__,
@@ -236,12 +134,10 @@ async def evaluate_retrieval(
     """Run a labelled retrieval dataset through the active retrieval pipeline."""
 
     try:
-        active_retriever = knowledge_bases.runtime(request.knowledge_base_id).retriever
+        knowledge_bases.get(request.knowledge_base_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
-    evaluator = retrieval_evaluator if request.knowledge_base_id == "default" else RetrievalEvaluator(
-        active_retriever, evaluation_store, concurrency=settings.evaluation_concurrency
-    )
+    evaluator = retrieval_evaluator if request.knowledge_base_id == "default" else service.retrieval_evaluator(request.knowledge_base_id)
     return await evaluator.evaluate(request)
 
 
@@ -257,12 +153,10 @@ async def evaluate_retrieval_dataset(
     if dataset is None:
         raise HTTPException(status_code=404, detail="Evaluation dataset not found")
     try:
-        active_retriever = knowledge_bases.runtime(request.knowledge_base_id).retriever
+        knowledge_bases.get(request.knowledge_base_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
-    evaluator = retrieval_evaluator if request.knowledge_base_id == "default" else RetrievalEvaluator(
-        active_retriever, evaluation_store, concurrency=settings.evaluation_concurrency
-    )
+    evaluator = retrieval_evaluator if request.knowledge_base_id == "default" else service.retrieval_evaluator(request.knowledge_base_id)
     return await evaluator.evaluate(
         RetrievalEvaluationRequest(
             cases=dataset.cases,
@@ -279,15 +173,10 @@ async def evaluate_rag(request: RAGEvaluationRequest) -> RAGEvaluationReport:
     """Run retrieval and answer generation, then score both stages."""
 
     try:
-        active_generation = knowledge_bases.runtime(request.knowledge_base_id).generation_pipeline
+        knowledge_bases.get(request.knowledge_base_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
-    evaluator = rag_evaluator if request.knowledge_base_id == "default" else RAGEvaluator(
-        active_generation,
-        evaluation_store,
-        concurrency=settings.evaluation_concurrency,
-        judge=judge_runtime.judge,
-    )
+    evaluator = rag_evaluator if request.knowledge_base_id == "default" else service.rag_evaluator(request.knowledge_base_id)
     return await evaluator.evaluate(request)
 
 
@@ -303,15 +192,10 @@ async def evaluate_rag_dataset(
     if dataset is None:
         raise HTTPException(status_code=404, detail="Evaluation dataset not found")
     try:
-        active_generation = knowledge_bases.runtime(request.knowledge_base_id).generation_pipeline
+        knowledge_bases.get(request.knowledge_base_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
-    evaluator = rag_evaluator if request.knowledge_base_id == "default" else RAGEvaluator(
-        active_generation,
-        evaluation_store,
-        concurrency=settings.evaluation_concurrency,
-        judge=judge_runtime.judge,
-    )
+    evaluator = rag_evaluator if request.knowledge_base_id == "default" else service.rag_evaluator(request.knowledge_base_id)
     return await evaluator.evaluate(
         RAGEvaluationRequest(
             cases=dataset.cases,

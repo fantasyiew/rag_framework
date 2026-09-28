@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from rag_framework.config import Settings
 from rag_framework.contracts.providers import QueryPlanner, StructuredOutputLLM
+from rag_framework.providers.fixed_planner import FixedQueryPlanner
 from rag_framework.providers.langchain import LangChainStructuredOutputLLM
 from rag_framework.providers.router import HeuristicQueryPlanner, LLMQueryPlanner
 
@@ -26,6 +27,12 @@ def build_query_planner(
 ) -> QueryPlannerRuntime:
     """Build a planner without making a network request during application startup."""
 
+    if config.query_planner_mode == "disabled":
+        return QueryPlannerRuntime(
+            planner=FixedQueryPlanner(config.default_retrieval_strategy,
+                                      config.default_top_k, config.default_retrieval_rerank),
+            configured_mode="disabled", active_mode="disabled", provider="built_in",
+        )
     heuristic = HeuristicQueryPlanner(default_top_k=config.default_top_k)
     if config.query_planner_mode == "heuristic":
         return QueryPlannerRuntime(

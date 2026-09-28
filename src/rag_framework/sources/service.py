@@ -115,8 +115,10 @@ class SourceService:
                    'source': self.get(source_id), 'options': options.model_dump(),
                    'status': 'running', 'received_documents': len(documents),
                    'created_documents': 0, 'skipped_documents': 0, 'created_chunks': 0,
-                   'chunk_size': self.pipeline.chunker.chunk_size,
-                   'overlap': self.pipeline.chunker.overlap,
+                   'chunk_size': self.pipeline.chunker.parameters.get('chunk_size'),
+                   'overlap': self.pipeline.chunker.parameters.get('overlap'),
+                   'chunker': type(self.pipeline.chunker).__name__,
+                   'chunker_parameters': self.pipeline.chunker.parameters,
                    'embedder': type(self.pipeline.embedder).__name__}
         self.save_run(run)
         try:

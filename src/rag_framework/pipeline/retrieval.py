@@ -9,6 +9,7 @@ from time import perf_counter
 
 from rag_framework.contracts.providers import (
     Embedder,
+    Fusion,
     KeywordStore,
     QueryPlanner,
     Reranker,
@@ -23,7 +24,7 @@ from rag_framework.core.models import (
     RetrievalTrace,
     RetrievedChunk,
 )
-from rag_framework.pipeline.fusion import reciprocal_rank_fusion
+from rag_framework.pipeline.fusion import RRFFusion
 
 
 class AdaptiveRetriever(Retriever):
@@ -38,6 +39,7 @@ class AdaptiveRetriever(Retriever):
         rrf_rank_constant: int = 60,
         reranker_candidate_k: int = 32,
         reranker_fail_open: bool = True,
+        fusion: Fusion | None = None,
     ) -> None:
         if hybrid_candidate_multiplier < 1:
             raise ValueError("hybrid_candidate_multiplier must be at least 1")
@@ -50,6 +52,7 @@ class AdaptiveRetriever(Retriever):
         self.reranker = reranker
         self.hybrid_candidate_multiplier = hybrid_candidate_multiplier
         self.rrf_rank_constant = rrf_rank_constant
+        self.fusion = fusion if fusion is not None else RRFFusion(rrf_rank_constant)
         if reranker_candidate_k < 1:
             raise ValueError("reranker_candidate_k must be positive")
         self.reranker_candidate_k = reranker_candidate_k
@@ -65,6 +68,7 @@ class AdaptiveRetriever(Retriever):
             (perf_counter() - started) * 1000,
             analysis=plan.analysis.model_dump(),
             planner=plan.planner,
+            skipped=plan.planner == "disabled",
             fallback_used=plan.fallback_used,
             fallback_reason=plan.fallback_reason,
         )
@@ -233,17 +237,18 @@ class AdaptiveRetriever(Retriever):
         )
 
         fusion_started = perf_counter()
-        fused = reciprocal_rank_fusion(
+        fused = self.fusion.fuse(
             {"vector": vector_results, "keyword": keyword_results},
             top_k=top_k,
-            rank_constant=self.rrf_rank_constant,
         )
         trace.add_step(
-            "rrf_fusion",
+            "rrf_fusion" if isinstance(self.fusion, RRFFusion) else "fusion",
             (perf_counter() - fusion_started) * 1000,
             input_count=len(vector_results) + len(keyword_results),
             output_count=len(fused),
-            rank_constant=self.rrf_rank_constant,
+            implementation=type(self.fusion).__name__,
+            parameters=self.fusion.parameters,
+            rank_constant=self.fusion.parameters.get("rank_constant"),
         )
         return fused
 

@@ -6,13 +6,13 @@ from hashlib import sha256
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from rag_framework.contracts.providers import Embedder, KeywordStore, VectorStore
+from rag_framework.contracts.providers import Chunker, Embedder, KeywordStore, VectorStore
 from rag_framework.core.models import Chunk, Document
 
 
-class CharacterChunker:
+class CharacterChunker(Chunker):
     def __init__(self, chunk_size: int = 800, overlap: int = 120) -> None:
-        if overlap >= chunk_size:
+        if chunk_size <= 0 or overlap < 0 or overlap >= chunk_size:
             raise ValueError("overlap must be smaller than chunk_size")
         self.chunk_size = chunk_size
         self.overlap = overlap
@@ -20,6 +20,10 @@ class CharacterChunker:
             chunk_size=chunk_size,
             chunk_overlap=overlap,
         )
+
+    @property
+    def parameters(self) -> dict[str, object]:
+        return {"chunk_size": self.chunk_size, "overlap": self.overlap}
 
     def split(self, document: Document) -> list[Chunk]:
         parts = self._splitter.split_text(document.content.strip())
@@ -39,7 +43,7 @@ class CharacterChunker:
 class IndexingPipeline:
     def __init__(
         self,
-        chunker: CharacterChunker,
+        chunker: Chunker,
         embedder: Embedder,
         vector_store: VectorStore,
         keyword_store: KeywordStore | None = None,

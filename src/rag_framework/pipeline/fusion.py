@@ -2,7 +2,24 @@
 
 from __future__ import annotations
 
+from rag_framework.contracts.providers import Fusion
 from rag_framework.core.models import RetrievedChunk
+
+
+class RRFFusion(Fusion):
+    def __init__(self, rank_constant: int = 60):
+        if rank_constant < 0:
+            raise ValueError("rank_constant must be non-negative")
+        self.rank_constant = rank_constant
+
+    @property
+    def parameters(self) -> dict[str, object]:
+        return {"rank_constant": self.rank_constant}
+
+    def fuse(self, result_sets, *, top_k):
+        return reciprocal_rank_fusion(
+            result_sets, top_k=top_k, rank_constant=self.rank_constant
+        )
 
 
 def reciprocal_rank_fusion(

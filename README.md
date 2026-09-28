@@ -1,5 +1,29 @@
 # RAG Framework
 
+P0-B：分块器使用 `RAG_CHUNKER_MODE=character`、
+`RAG_CHUNK_SIZE=800`、`RAG_CHUNK_OVERLAP=120`。
+融合使用 `RAG_FUSION_MODE=rrf`；可选的新键
+`RAG_FUSION_RANK_CONSTANT` 优先于旧 `RAG_RRF_RANK_CONSTANT`，
+冲突信息可在健康检查的 fusion 组件信息中查看。
+修改分块参数仅影响后续写入；已有文档需显式重建才能重新分块。
+
+`RAG_QUERY_PLANNER_MODE=disabled` 时使用
+`RAG_DEFAULT_RETRIEVAL_STRATEGY=vector|keyword|hybrid` 固定策略，不调用分析模型、
+不自动改写。重排由 `RAG_DEFAULT_RETRIEVAL_RERANK` 和重排 Provider 配置共同决定。
+
+Python 扩展可继承 `contracts.providers.Chunker/Fusion` 并实现
+`split/fuse`，可选覆盖 `parameters` 提供非敏感配置。
+在构造服务前调用 `providers.algorithm_factory.chunkers.register(name, factory)`
+或 `fusions.register(name, factory)`，工厂接收 Settings；重复名与未知模式会报错。
+写入记录保留分块器类型和参数，Trace 保留融合实现及参数。
+
+服务构造统一使用 `rag_framework.service.build_service(settings)`，返回
+`ServiceRuntime`，支持通过 `knowledge_bases.runtime(id)` 获取指定库的管线，
+使用结束后调用 `await service.close()`。`/health.components` 描述启动时的组件选择，
+逐请求回退以 Trace 为准。原始来源和知识库目录分别通过
+`RAG_SOURCE_DIRECTORY`（默认 `data/sources`）及
+`RAG_KNOWLEDGE_BASE_DIRECTORY`（默认 `data/knowledge_bases`）配置。
+
 ## 数据源适配与文档目录
 
 控制台「知识源」支持 TXT/Markdown（UTF-8）、平面 JSON 对象或对象数组、DOCX。

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,8 +12,27 @@ class Settings(BaseSettings):
 
     chroma_directory: Path = Path("data/chroma")
     chroma_collection: str = "documents"
+    source_directory: Path = Path("data/sources")
+    knowledge_base_directory: Path = Path("data/knowledge_bases")
     embedding_dimensions: int = 384
-    default_top_k: int = 8
+    default_top_k: int = Field(default=8, ge=1, le=100)
+    chunker_mode: str = Field(default="character", min_length=1)
+    chunk_size: int = Field(default=800, gt=0)
+    chunk_overlap: int = Field(default=120, ge=0)
+    fusion_mode: str = Field(default="rrf", min_length=1)
+    fusion_rank_constant: int | None = Field(default=None, ge=0)
+    default_retrieval_strategy: Literal["vector", "keyword", "hybrid"] = "hybrid"
+    default_retrieval_rerank: bool = True
+
+    @model_validator(mode="after")
+    def validate_chunking(self):
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+        return self
+
+    @property
+    def effective_fusion_rank_constant(self) -> int:
+        return self.rrf_rank_constant if self.fusion_rank_constant is None else self.fusion_rank_constant
     reranker_mode: Literal["disabled", "cross_encoder", "cloud", "auto"] = "disabled"
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
     reranker_device: str = "cpu"
@@ -28,7 +47,7 @@ class Settings(BaseSettings):
     reranker_cloud_api_key: SecretStr | None = None
     reranker_cloud_timeout: float = Field(default=30.0, gt=0)
     reranker_cloud_instruct: str | None = None
-    query_planner_mode: Literal["heuristic", "llm", "auto"] = "auto"
+    query_planner_mode: Literal["disabled", "heuristic", "llm", "auto"] = "auto"
     planner_model: str = "gpt-4o-mini"
     planner_api_key: SecretStr | None = None
     planner_base_url: str | None = None

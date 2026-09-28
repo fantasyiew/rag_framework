@@ -2,7 +2,7 @@
 
 > 对应需求：`docs/iteration-requirements.md` v0.2.1  
 > 创建日期：2026-09-27  
-> 当前状态：待实施
+> 当前状态：P0-A、P0-B 已完成，P1 待实施
 
 ## 1. 实施目标
 
@@ -22,12 +22,12 @@ P0-A 基线与统一装配
 
 ### 任务
 
-- [ ] 提交并标记当前知识源、多知识库、评估与 UI 基线。
-- [ ] 定义 `ServiceRuntime`，集中持有应用级共享组件、评估存储和知识库管理器。
-- [ ] 定义知识库运行时工厂，统一创建索引、检索、生成和来源服务。
-- [ ] 将具体组件实例化从 `api/main.py` 移到 `build_service(settings)`。
-- [ ] 定义统一组件运行信息：`configured`、`active`、`implementation`、`parameters`、`fallback_reason`。
-- [ ] 保持现有路由、响应模型和默认配置兼容。
+- [x] 提交并标记当前知识源、多知识库、评估与 UI 基线。
+- [x] 定义 `ServiceRuntime`，集中持有应用级共享组件、评估存储和知识库管理器。
+- [x] 定义知识库运行时工厂，统一创建索引、检索、生成和来源服务。
+- [x] 将具体组件实例化从 `api/main.py` 移到 `build_service(settings)`。
+- [x] 定义统一组件运行信息：`configured`、`active`、`implementation`、`parameters`、`fallback_reason`。
+- [x] 保持现有路由、响应模型和默认配置兼容。
 
 ### 验收门槛
 
@@ -39,13 +39,13 @@ P0-A 基线与统一装配
 
 ### 任务
 
-- [ ] 新增 `Chunker` 契约、注册表和 `build_chunker()`。
-- [ ] 配置化 `RAG_CHUNK_SIZE`、`RAG_CHUNK_OVERLAP`、`RAG_CHUNKER_MODE`。
-- [ ] 新增 `Fusion` 契约、注册表和 `build_fusion()`。
-- [ ] 将现有 RRF 封装为默认 Fusion 实现，保留旧配置键别名。
-- [ ] 为 WeightedSum 设计归一化协议；本阶段可只交付 RRF，避免仓促引入不可比分数。
-- [ ] 新增 Planner `disabled` 模式和固定检索策略，不执行自动 Query Rewrite。
-- [ ] 将 Chunker 参数记录到写入运行，将 Fusion 实现与参数记录到检索 Trace。
+- [x] 新增 `Chunker` 契约、注册表和 `build_chunker()`。
+- [x] 配置化 `RAG_CHUNK_SIZE`、`RAG_CHUNK_OVERLAP`、`RAG_CHUNKER_MODE`。
+- [x] 新增 `Fusion` 契约、注册表和 `build_fusion()`。
+- [x] 将现有 RRF 封装为默认 Fusion 实现，保留旧配置键别名。
+- [x] 为 WeightedSum 设计归一化协议；本阶段可只交付 RRF，避免仓促引入不可比分数。
+- [x] 新增 Planner `disabled` 模式和固定检索策略，不执行自动 Query Rewrite。
+- [x] 将 Chunker 参数记录到写入运行，将 Fusion 实现与参数记录到检索 Trace。
 
 ### 验收门槛
 
@@ -138,4 +138,4 @@ P0-A 基线与统一装配
 
 ## 10. 下一步执行建议
 
-下一次实现从 P0-A 开始：先提交当前稳定基线，再引入 `ServiceRuntime` 和统一知识库运行时工厂。完成并验证装配重构后，再进入 Chunker/Fusion 契约，暂不直接切换生产 Embedding。
+下一次实现从 P1 开始：引入 Embedder/VectorStore 工厂与 IndexManifest，先验证索引兼容与显式重建门禁，再接入远程 Embedding。P0-B 的 WeightedSum 归一化协议已记录在 implementation-progress.md，算法实现仍在 P3。

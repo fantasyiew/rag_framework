@@ -5,7 +5,34 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
-from rag_framework.core.models import Chunk, Query, RetrievalPlan, RetrievalTrace, RetrievedChunk
+from rag_framework.core.models import (
+    Chunk,
+    Document,
+    Query,
+    RetrievalPlan,
+    RetrievalTrace,
+    RetrievedChunk,
+)
+
+
+class Chunker(ABC):
+    @property
+    def parameters(self) -> dict[str, object]:
+        return {}
+
+    @abstractmethod
+    def split(self, document: Document) -> list[Chunk]: ...
+
+
+class Fusion(ABC):
+    @property
+    def parameters(self) -> dict[str, object]:
+        return {}
+
+    @abstractmethod
+    def fuse(
+        self, result_sets: dict[str, list[RetrievedChunk]], *, top_k: int
+    ) -> list[RetrievedChunk]: ...
 
 
 class Embedder(ABC):
