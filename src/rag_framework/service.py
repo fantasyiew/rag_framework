@@ -1,24 +1,24 @@
 """Shared service composition for HTTP and Python consumers."""
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
 from rag_framework.config import Settings
+from rag_framework.contracts.lifecycle import AsyncClosable
 from rag_framework.evaluation import (
     EvaluationDatasetStore,
     EvaluationStore,
     RAGEvaluator,
     RetrievalEvaluator,
 )
+from rag_framework.index_state import IndexState
 from rag_framework.knowledge_bases import (
     KnowledgeBaseManager,
     KnowledgeBaseRuntime,
 )
 from rag_framework.pipeline.generation import GenerationPipeline
-from rag_framework.pipeline.indexing import IndexingPipeline
-from rag_framework.pipeline.retrieval import AdaptiveRetriever
+from rag_framework.pipeline.managed import ManagedIndexingPipeline, ManagedRetriever
 from rag_framework.providers import (
-    ChromaVectorStore,
-    HashEmbedder,
     build_answer_generator,
     build_answer_judge,
     build_query_planner,
@@ -26,6 +26,8 @@ from rag_framework.providers import (
     create_keyword_store,
 )
 from rag_framework.providers.algorithm_factory import build_chunker, build_fusion
+from rag_framework.providers.embedding_factory import build_embedder
+from rag_framework.providers.vector_factory import build_vector_store
 from rag_framework.sources.service import SourceService
 
 
@@ -49,6 +51,7 @@ class ServiceRuntime:
     evaluation_store: EvaluationStore
     evaluation_dataset_store: EvaluationDatasetStore
     components: dict[str, ComponentInfo]
+    embedder: Any = None
     _closed: bool = False
 
     def retrieval_evaluator(self, knowledge_base_id: str = "default"):
@@ -71,13 +74,17 @@ class ServiceRuntime:
         try:
             await self.knowledge_bases.close()
         finally:
-            close = getattr(self.reranker, "close", None)
-            if close is not None:
-                await close()
+            try:
+                if isinstance(self.reranker, AsyncClosable):
+                    await self.reranker.close()
+            finally:
+                if isinstance(self.embedder, AsyncClosable):
+                    await self.embedder.close()
 
 
 def build_service(settings: Settings) -> ServiceRuntime:
-    embedder = HashEmbedder(settings.embedding_dimensions)
+    embedding = build_embedder(settings)
+    embedder = embedding.embedder
     planner_runtime = build_query_planner(settings)
     generator_runtime = build_answer_generator(settings)
     judge_runtime = build_answer_judge(settings)
@@ -87,12 +94,27 @@ def build_service(settings: Settings) -> ServiceRuntime:
         suffix = "" if knowledge_base_id == "default" else f"_{knowledge_base_id}"
         collection = f"{settings.chroma_collection}{suffix}"
         index_name = f"{settings.elasticsearch_index}{suffix}"
-        runtime_vector_store = ChromaVectorStore(settings.chroma_directory, collection)
+        runtime_vector_store = build_vector_store(settings, collection_name=collection)
         runtime_keyword_store = create_keyword_store(settings, index_name=index_name)
-        runtime_indexing = IndexingPipeline(
-            build_chunker(settings), embedder, runtime_vector_store, runtime_keyword_store
+        chunker = build_chunker(settings)
+        source_directory = (settings.source_directory if knowledge_base_id == "default" else
+                            settings.knowledge_base_directory / knowledge_base_id / "sources")
+        state = IndexState(source_directory, {
+            "embedding": embedding.fingerprint,
+            "chunker": {"implementation": type(chunker).__module__ + "." + type(chunker).__qualname__,
+                        "parameters": chunker.parameters},
+            "vector": {"backend": settings.vector_backend,
+                       "implementation": type(runtime_vector_store).__module__ + "." + type(runtime_vector_store).__qualname__,
+                       "collection": collection,
+                       "directory": str(settings.chroma_directory.resolve())},
+            "keyword": {"backend": settings.keyword_backend,
+                        "implementation": type(runtime_keyword_store).__name__, "index": index_name,
+                        "endpoint_digest": hashlib.sha256(settings.elasticsearch_url.encode()).hexdigest()},
+        }, runtime_vector_store, runtime_keyword_store)
+        runtime_indexing = ManagedIndexingPipeline(
+            chunker, embedder, runtime_vector_store, runtime_keyword_store, state=state
         )
-        runtime_retriever = AdaptiveRetriever(
+        runtime_retriever = ManagedRetriever(
             runtime_vector_store,
             embedder,
             planner_runtime.planner,
@@ -103,6 +125,7 @@ def build_service(settings: Settings) -> ServiceRuntime:
             hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,
             rrf_rank_constant=settings.effective_fusion_rank_constant,
             fusion=build_fusion(settings),
+            state=state,
         )
         runtime_generation = GenerationPipeline(
             runtime_retriever,
@@ -110,8 +133,7 @@ def build_service(settings: Settings) -> ServiceRuntime:
             max_context_chunks=settings.generation_max_context_chunks,
         )
         runtime_sources = SourceService(
-            (settings.source_directory if knowledge_base_id == "default" else
-             settings.knowledge_base_directory / knowledge_base_id / "sources"), runtime_indexing
+            source_directory, runtime_indexing
         )
         return KnowledgeBaseRuntime(
             vector_store=runtime_vector_store,
@@ -120,14 +142,17 @@ def build_service(settings: Settings) -> ServiceRuntime:
             retriever=runtime_retriever,
             generation_pipeline=runtime_generation,
             sources=runtime_sources,
+            index_state=state,
         )
     
     default = runtime_factory("default")
     manager = KnowledgeBaseManager(settings.knowledge_base_directory, default, runtime_factory)
     components = {
-        "embedding": ComponentInfo("hash", "hash", type(embedder).__name__,
-                                   {"dimensions": settings.embedding_dimensions}),
-        "vector_store": ComponentInfo("chroma", "chroma", type(default.vector_store).__name__),
+        "embedding": ComponentInfo(embedding.configured_mode, embedding.active_mode,
+                                   type(embedder).__name__, embedding.fingerprint,
+                                   embedding.fallback_reason),
+        "vector_store": ComponentInfo(settings.vector_backend, settings.vector_backend,
+                                      type(default.vector_store).__name__),
         "chunker": ComponentInfo(settings.chunker_mode, settings.chunker_mode,
             type(default.indexing_pipeline.chunker).__name__,
             default.indexing_pipeline.chunker.parameters),
@@ -163,5 +188,5 @@ def build_service(settings: Settings) -> ServiceRuntime:
                         directory=settings.evaluation_report_directory),
         EvaluationDatasetStore(settings.evaluation_dataset_directory,
                                max_cases=settings.evaluation_dataset_max_cases),
-        components,
+        components, embedder=embedder,
     )

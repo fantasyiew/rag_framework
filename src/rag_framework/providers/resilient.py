@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from rag_framework.contracts.lifecycle import AsyncClosable, HealthCheck, IndexAdmin
 from rag_framework.contracts.providers import KeywordStore
 from rag_framework.core.models import Chunk, RetrievedChunk
 
@@ -24,6 +25,11 @@ class ResilientKeywordStore(KeywordStore):
         except Exception:
             logger.exception("Primary keyword index failed; in-memory fallback remains available")
 
+    async def upsert_strict(self, chunks: list[Chunk]) -> None:
+        # Managed writes must not mark a durable index ready after a primary failure.
+        await self.primary.upsert(chunks)
+        await self.fallback.upsert(chunks)
+
     async def search(
         self, query: str, *, top_k: int, filters: dict[str, object]
     ) -> list[RetrievedChunk]:
@@ -38,8 +44,7 @@ class ResilientKeywordStore(KeywordStore):
             ]
 
     async def health(self) -> bool:
-        health = getattr(self.primary, "health", None)
-        return bool(await health()) if health is not None else True
+        return bool(await self.primary.health()) if isinstance(self.primary, HealthCheck) else True
 
     async def clear(self) -> int:
         fallback_count = await self.fallback.clear()
@@ -47,15 +52,11 @@ class ResilientKeywordStore(KeywordStore):
         return max(fallback_count, primary_count)
 
     async def count(self) -> int:
-        count = getattr(self.primary, "count", None)
-        if count is not None:
-            try:
-                return int(await count())
-            except Exception:
-                logger.exception("Primary keyword count failed; using in-memory fallback")
-        return int(await self.fallback.count())
+        if not isinstance(self.primary, IndexAdmin):
+            raise TypeError("Primary store does not support index administration")
+        return int(await self.primary.count())
 
     async def close(self) -> None:
-        close = getattr(self.primary, "close", None)
-        if close is not None:
-            await close()
+        for store in (self.primary, self.fallback):
+            if isinstance(store, AsyncClosable):
+                await store.close()

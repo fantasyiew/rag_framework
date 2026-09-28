@@ -2,7 +2,7 @@
 
 > 对应需求：`docs/iteration-requirements.md` v0.2.1  
 > 创建日期：2026-09-27  
-> 当前状态：P0-A、P0-B 已完成，P1 待实施
+> 当前状态：P0-A、P0-B、P1 已完成，P2 待实施
 
 ## 1. 实施目标
 
@@ -58,13 +58,13 @@ P0-A 基线与统一装配
 
 ### 任务
 
-- [ ] 实现 `build_embedder()`，首批支持 `hash` 与一个远程 OpenAI-compatible/DashScope 实现。
-- [ ] 实现 `build_vector_store()`，首批只正式支持 Chroma，同时预留注册表扩展点。
-- [ ] 定义 `IndexAdmin`、`HealthCheck`、`AsyncClosable` 等能力契约。
-- [ ] 新增知识库 `IndexManifest`，记录 Embedder 指纹、Chunker 指纹、创建时间和 schema 版本。
-- [ ] 在启动、写入、查询、重建前执行索引兼容校验。
-- [ ] 配置不兼容时阻止写入和查询，返回包含重建建议的可读错误。
-- [ ] 重建成功后原子更新索引清单；失败时保留可恢复状态和失败记录。
+- [x] 实现 `build_embedder()`，首批支持 `hash` 与一个远程 OpenAI-compatible/DashScope 实现。
+- [x] 实现 `build_vector_store()`，首批只正式支持 Chroma，同时预留注册表扩展点。
+- [x] 定义 `IndexAdmin`、`HealthCheck`、`AsyncClosable` 等能力契约。
+- [x] 新增知识库 `IndexManifest`，记录 Embedder 指纹、Chunker 指纹、创建时间和 schema 版本。
+- [x] 在启动、写入、查询、重建前执行索引兼容校验。
+- [x] 配置不兼容时阻止写入和查询，返回包含重建建议的可读错误。
+- [x] 重建成功后原子更新索引清单；失败时保留可恢复状态和失败记录。
 
 ### 验收门槛
 
@@ -138,4 +138,4 @@ P0-A 基线与统一装配
 
 ## 10. 下一步执行建议
 
-下一次实现从 P1 开始：引入 Embedder/VectorStore 工厂与 IndexManifest，先验证索引兼容与显式重建门禁，再接入远程 Embedding。P0-B 的 WeightedSum 归一化协议已记录在 implementation-progress.md，算法实现仍在 P3。
+下一次实现从 P2 开始：定义版本化 Preset、配置覆盖优先级与脱敏快照。P1 的索引保护和失败恢复已完成，具体兼容边界见 index-safety.md。WeightedSum/RRS、额外 Provider 和 Adapter 仍在 P3。

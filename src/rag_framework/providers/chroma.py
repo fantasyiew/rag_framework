@@ -52,14 +52,25 @@ class ChromaVectorStore(VectorStore):
         return await asyncio.to_thread(self._clear_sync)
 
     def _clear_sync(self) -> int:
-        result = self._collection.get(include=[])
-        ids = result.get("ids", [])
-        if ids:
-            self._collection.delete(ids=ids)
-        return len(ids)
+        count = self._collection.count()
+        # Reset collection also resets its fixed embedding dimension.
+        self._vector_store.reset_collection()
+        self._collection = self._vector_store._collection
+        return count
 
     async def count(self) -> int:
         return await asyncio.to_thread(self._collection.count)
+
+    async def health(self) -> bool:
+        try:
+            await self.count()
+            return True
+        except Exception:  # noqa: BLE001 - Health reports provider availability.
+            return False
+
+    async def close(self) -> None:
+        # Chroma's embedded client is process-shared; stopping it breaks sibling collections.
+        pass
 
     @staticmethod
     def _metadata(chunk: Chunk) -> dict[str, Any]:

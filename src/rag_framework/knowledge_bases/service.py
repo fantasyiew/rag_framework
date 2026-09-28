@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from rag_framework.contracts.lifecycle import AsyncClosable
+from rag_framework.index_state import IndexState
 from rag_framework.pipeline.generation import GenerationPipeline
 from rag_framework.pipeline.indexing import IndexingPipeline
 from rag_framework.pipeline.retrieval import AdaptiveRetriever
@@ -29,6 +31,7 @@ class KnowledgeBaseRuntime:
     retriever: AdaptiveRetriever
     generation_pipeline: GenerationPipeline
     sources: SourceService
+    index_state: IndexState | None = None
 
 
 class KnowledgeBaseManager:
@@ -76,12 +79,25 @@ class KnowledgeBaseManager:
     async def describe(self, knowledge_base_id: str) -> dict:
         item = self.get(knowledge_base_id)
         runtime = self.runtime(knowledge_base_id)
+        counts, errors = {}, {}
+        for name, store in (("vector_chunks", runtime.vector_store), ("keyword_chunks", runtime.keyword_store)):
+            try:
+                counts[name] = await store.count()
+            except Exception as exc:  # noqa: BLE001 - Admin must remain available during outages.
+                counts[name] = None
+                errors[name] = type(exc).__name__
         return {**item.model_dump(), **runtime.sources.stats(),
-                "vector_chunks": await runtime.vector_store.count(),
-                "keyword_chunks": await runtime.keyword_store.count()}
+                "index": await runtime.index_state.describe() if runtime.index_state else None,
+                **counts, "count_errors": errors}
 
     async def close(self) -> None:
+        errors = []
         for runtime in self._runtimes.values():
-            close = getattr(runtime.keyword_store, "close", None)
-            if close is not None:
-                await close()
+            for store in (runtime.keyword_store, runtime.vector_store):
+                if isinstance(store, AsyncClosable):
+                    try:
+                        await store.close()
+                    except Exception as exc:  # noqa: BLE001 - Close all resources before reporting.
+                        errors.append(exc)
+        if errors:
+            raise ExceptionGroup("Store shutdown failures", errors)

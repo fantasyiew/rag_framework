@@ -60,6 +60,12 @@ class InMemoryBM25KeywordStore(KeywordStore):
         with self._lock:
             return len(self._chunks)
 
+    async def health(self) -> bool:
+        return True
+
+    async def close(self) -> None:
+        pass
+
     def _search_sync(
         self, query: str, top_k: int, filters: dict[str, object]
     ) -> list[RetrievedChunk]:

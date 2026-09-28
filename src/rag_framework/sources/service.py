@@ -8,6 +8,9 @@ from pathlib import Path
 from time import time
 from uuid import uuid4
 
+from rag_framework.contracts.lifecycle import IndexAdmin, RecoverableIndex
+from rag_framework.core.models import Document
+from rag_framework.index_state import IndexCompatibilityError
 from rag_framework.pipeline.indexing import IndexingPipeline
 
 from .adapters import AdapterOptions, digest, registry
@@ -107,6 +110,8 @@ class SourceService:
 
     async def ingest(self, source_id: str, options: AdapterOptions):
         async with self.lock:
+            if isinstance(self.pipeline, RecoverableIndex):
+                await self.pipeline.check_index()
             return await self._ingest_unlocked(source_id, options)
 
     async def _ingest_unlocked(self, source_id: str, options: AdapterOptions):
@@ -146,12 +151,13 @@ class SourceService:
     async def clear(self):
         """Clear derived retrieval state while preserving artifacts and audit runs."""
         async with self.lock:
-            vector_clear = getattr(self.pipeline.vector_store, 'clear', None)
-            keyword_clear = getattr(self.pipeline.keyword_store, 'clear', None)
-            if vector_clear is None or keyword_clear is None:
-                raise RuntimeError('Configured stores do not support clearing')
-            vector_chunks = await vector_clear()
-            keyword_chunks = await keyword_clear()
+            if isinstance(self.pipeline, RecoverableIndex):
+                vector_chunks, keyword_chunks = await self.pipeline.clear_index()
+            else:
+                if not isinstance(self.pipeline.vector_store, IndexAdmin) or not isinstance(self.pipeline.keyword_store, IndexAdmin):
+                    raise TypeError('Configured stores do not support clearing')
+                vector_chunks = await self.pipeline.vector_store.clear()
+                keyword_chunks = await self.pipeline.keyword_store.clear()
             with self.connect() as db:
                 document_count = db.execute('SELECT COUNT(*) FROM documents').fetchone()[0]
                 db.execute('DELETE FROM documents')
@@ -169,6 +175,8 @@ class SourceService:
     async def rebuild(self):
         """Recreate all derived documents and indexes from successful ingest recipes."""
         async with self.lock:
+            if isinstance(self.pipeline, RecoverableIndex):
+                return await self._rebuild_managed()
             recipes: list[tuple[str, AdapterOptions]] = []
             seen: set[tuple[str, str]] = set()
             for run in self.list_runs():
@@ -181,12 +189,10 @@ class SourceService:
                     recipes.append((source_id, AdapterOptions.model_validate(options_payload)))
                     seen.add(key)
 
-            vector_clear = getattr(self.pipeline.vector_store, 'clear', None)
-            keyword_clear = getattr(self.pipeline.keyword_store, 'clear', None)
-            if vector_clear is None or keyword_clear is None:
-                raise RuntimeError('Configured stores do not support rebuilding')
-            await vector_clear()
-            await keyword_clear()
+            if not isinstance(self.pipeline.vector_store, IndexAdmin) or not isinstance(self.pipeline.keyword_store, IndexAdmin):
+                raise TypeError('Configured stores do not support rebuilding')
+            await self.pipeline.vector_store.clear()
+            await self.pipeline.keyword_store.clear()
             with self.connect() as db:
                 db.execute('DELETE FROM documents')
 
@@ -199,3 +205,40 @@ class SourceService:
                 'runs': results,
                 'documents': self.stats()['documents'],
             }
+
+    async def _rebuild_managed(self):
+        run = {'id': uuid4().hex, 'source_id': '', 'operation': 'rebuild',
+               'status': 'running', 'started_at': time()}
+        self.save_run(run)
+        try:
+            # Resolve every input before clearing; keep canonical documents on all failures.
+            documents = {d.id: d for d in self.pipeline.canonical_documents()}
+            documents.update({d['id']: Document.model_validate(d) for d in self.list_documents()})
+            recipes = set()
+            for previous in self.list_runs():
+                if previous.get('operation', 'ingest') != 'ingest' or previous.get('status') != 'complete':
+                    continue
+                key = (previous['source_id'], json.dumps(previous['options'], sort_keys=True))
+                if key in recipes:
+                    continue
+                recipes.add(key)
+                for document in self.prepare(previous['source_id'], AdapterOptions.model_validate(previous['options'])):
+                    documents.setdefault(document.id, document)
+            chunks = await self.pipeline.rebuild_documents(list(documents.values()))
+            documents = {document.id: document for document in self.pipeline.canonical_documents()}
+            with self.connect() as db:
+                db.execute('DELETE FROM documents')
+                for document in documents.values():
+                    db.execute('INSERT INTO documents VALUES (?,?,?)',
+                               (document.id, document.metadata.get('source_id', ''), document.model_dump_json()))
+            run.update(status='complete', documents=len(documents), recipes=len(recipes),
+                       created_chunks=len(chunks), runs=[])
+        except Exception as exc:  # noqa: BLE001 - Persist failures for recovery without provider secrets.
+            run.update(status='failed', error=type(exc).__name__,
+                       documents=self.stats()['documents'], recipes=0, runs=[])
+            if isinstance(exc, IndexCompatibilityError):
+                run['message'] = str(exc)
+        finally:
+            run['finished_at'] = time()
+            self.save_run(run)
+        return run

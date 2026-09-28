@@ -251,9 +251,10 @@ async function loadKnowledgeBases() {
     const option = el('option', item.name); option.value = item.id; option.selected = item.id === knowledgeBaseId; select.append(option);
     const card = el('div', undefined, 'item');
     card.append(el('strong', item.name), el('p', `${item.documents} 篇 Document · ${item.vector_chunks} 个向量 chunk · ${item.sources} 个原始来源 · ${item.runs} 条记录`, 'muted'));
+    if (item.index?.status === 'blocked' || item.index?.status === 'unavailable') card.append(el('p', `索引不可用：${item.index.reason}`, 'error'));
     const use = el('button', item.id === knowledgeBaseId ? '当前使用' : '切换'); use.disabled = item.id === knowledgeBaseId; use.onclick = () => switchKnowledgeBase(item.id);
     const clear = el('button', '清空索引'); clear.onclick = async () => { if (!confirm(`确认清空“${item.name}”的 Document 与检索索引？原始文件和写入历史会保留。`)) return; clear.disabled = true; try { const result = await post(`/v1/knowledge-bases/${item.id}/clear`, {}); notice(`已清空：${result.deleted_documents} 篇 Document，原始来源仍保留。`); await loadKnowledgeBases(); if (item.id === knowledgeBaseId) await loadSources(); } catch(error) { notice(error.message, true); } finally { clear.disabled = false; } };
-    const rebuild = el('button', '从原始数据重建'); rebuild.onclick = async () => { rebuild.disabled = true; notice('正在重建知识库…'); try { const result = await post(`/v1/knowledge-bases/${item.id}/rebuild`, {}); notice(`重建完成：执行 ${result.recipes} 个写入配置，恢复 ${result.documents} 篇 Document。`); await loadKnowledgeBases(); } catch(error) { notice(error.message, true); } finally { rebuild.disabled = false; } };
+    const rebuild = el('button', '从原始数据重建'); rebuild.onclick = async () => { rebuild.disabled = true; notice('正在重建知识库…'); try { const result = await post(`/v1/knowledge-bases/${item.id}/rebuild`, {}); if (result.status !== 'complete') throw new Error(result.message || `重建失败：${result.error || result.status}。原始数据已保留，可重试。`); notice(`重建完成：执行 ${result.recipes} 个写入配置，恢复 ${result.documents} 篇 Document。`); await loadKnowledgeBases(); } catch(error) { notice(error.message, true); } finally { rebuild.disabled = false; } };
     card.append(use, clear, rebuild); $('kb-list').append(card);
   });
   if (!items.some(item => item.id === knowledgeBaseId)) switchKnowledgeBase('default');

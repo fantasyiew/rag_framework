@@ -1,5 +1,16 @@
 # RAG Framework
 
+P1 引入 `build_embedder()` / `build_vector_store()`。嵌入支持 `hash`、
+`compatible`（OpenAI-compatible HTTP 协议，可连接 DashScope 兼容接口）与 `auto`。
+远程模式需要独立配置 `RAG_EMBEDDING_MODEL/API_KEY/BASE_URL`，
+及模型支持的 `RAG_EMBEDDING_DIMENSIONS`；不会自动复用聊天密钥。
+默认仍为离线 Hash 384 维。详见 [索引安全与迁移](docs/index-safety.md)。
+
+每个知识库的来源目录新增 `index-state.sqlite3`，保存模型/维度/分块/后端指纹与
+可恢复 Document。旧索引无指纹，或配置不匹配时，查询与写入返回 409，须显式重建。
+重建期间及失败后禁止使用半成品索引；原始数据和恢复日志保留。清空不删除恢复档案。
+目前为单进程锁；部署时使用单个 worker。
+
 P0-B：分块器使用 `RAG_CHUNKER_MODE=character`、
 `RAG_CHUNK_SIZE=800`、`RAG_CHUNK_OVERLAP=120`。
 融合使用 `RAG_FUSION_MODE=rrf`；可选的新键

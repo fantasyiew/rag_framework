@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi import Query as QueryParameter
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ from rag_framework.evaluation import (
     RetrievalEvaluationReport,
     RetrievalEvaluationRequest,
 )
+from rag_framework.index_state import IndexCompatibilityError
 from rag_framework.knowledge_bases import knowledge_base_router
 from rag_framework.service import build_service
 from rag_framework.sources.api import source_router
@@ -60,6 +61,11 @@ rag_evaluator = service.rag_evaluator()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Keep management endpoints available so blocked legacy indexes can be rebuilt.
+    app.state.index_checks = {
+        item.id: await knowledge_bases.runtime(item.id).index_state.describe()
+        for item in knowledge_bases.list()
+    }
     yield
     await service.close()
 
@@ -71,13 +77,20 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(IndexCompatibilityError)
+async def index_compatibility_error(request: Request, exc: IndexCompatibilityError):
+    return JSONResponse(status_code=409, content={"detail": str(exc), "code": "index_incompatible"})
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     health_check = getattr(keyword_store, "health", None)
     primary_healthy = bool(await health_check()) if health_check is not None else True
+    index_status = await default_runtime.index_state.describe()
     return {
         "components": {name: asdict(info) for name, info in service.components.items()},
-        "status": "healthy" if primary_healthy else "degraded",
+        "status": "healthy" if primary_healthy and index_status["status"] in {"ready", "empty"} else "degraded",
+        "index": index_status,
         "configured_keyword_backend": settings.keyword_backend,
         "active_keyword_store": type(keyword_store).__name__,
         "keyword_primary_healthy": primary_healthy,
@@ -292,6 +305,8 @@ async def stream_chat(query: Query) -> StreamingResponse:
         runtime = knowledge_bases.runtime(query.knowledge_base_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
+
+    await runtime.indexing_pipeline.check_index()
 
     async def events():
         try:

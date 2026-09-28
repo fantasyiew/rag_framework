@@ -14,7 +14,16 @@ class Settings(BaseSettings):
     chroma_collection: str = "documents"
     source_directory: Path = Path("data/sources")
     knowledge_base_directory: Path = Path("data/knowledge_bases")
-    embedding_dimensions: int = 384
+    embedding_dimensions: int = Field(default=384, gt=0)
+    embedding_mode: str = "hash"
+    embedding_model: str | None = None
+    embedding_model_revision: str | None = None
+    embedding_api_key: SecretStr | None = None
+    embedding_base_url: str | None = None
+    embedding_batch_size: int = Field(default=10, ge=1)
+    embedding_request_timeout: float = Field(default=30.0, gt=0)
+    embedding_send_dimensions: bool = True
+    vector_backend: str = "chroma"
     default_top_k: int = Field(default=8, ge=1, le=100)
     chunker_mode: str = Field(default="character", min_length=1)
     chunk_size: int = Field(default=800, gt=0)
