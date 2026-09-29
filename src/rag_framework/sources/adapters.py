@@ -1,6 +1,8 @@
+import csv
 import hashlib
 import io
 import json
+import re
 import zipfile
 from abc import ABC, abstractmethod
 from typing import ClassVar
@@ -116,6 +118,97 @@ class JsonAdapter(SourceAdapter):
         return documents
 
 
+class CsvAdapter(JsonAdapter):
+    """Comma-separated UTF-8 records; preserve every cell as a string."""
+
+    kind = 'csv'
+
+    def records(self, data: bytes) -> list[dict]:
+        try:
+            text(data)  # Validate encoding without trimming cell whitespace.
+            reader = csv.reader(io.StringIO(data.decode('utf-8-sig'), newline=''), strict=True)
+            headers = next(reader)
+            if not headers or any(not h.strip() for h in headers):
+                raise ValueError('CSV 表头不能为空')
+            if len(set(headers)) != len(headers):
+                raise ValueError('CSV 表头不能重复')
+            records = []
+            for row in reader:
+                if not row:
+                    continue
+                if len(row) != len(headers):
+                    raise ValueError(f'CSV 第 {reader.line_num} 行列数与表头不一致')
+                records.append(dict(zip(headers, row, strict=True)))
+            if not records:
+                raise ValueError('CSV 必须包含数据行')
+            return records
+        except csv.Error as exc:
+            raise ValueError('CSV 格式错误或字段过长') from exc
+
+
+class MarkdownAdapter(SourceAdapter):
+    """Section adapter supporting ATX/Setext headings and fenced code blocks."""
+
+    kind = 'markdown'
+
+    def documents(self, data: bytes, options: AdapterOptions) -> list[Document]:
+        # Keep original line offsets, including leading blank lines.
+        text(data)  # Shared encoding/empty-content validation.
+        lines = data.decode('utf-8-sig').replace('\r\n', '\n').replace('\r', '\n').splitlines()
+        documents, body, headings = [], [], []
+        start, fence, index = 1, None, 0
+
+        def flush(end):
+            content = '\n'.join(body).strip()
+            if content:
+                documents.append(Document(content=content, metadata={
+                    'source_type': self.kind,
+                    'heading_path': [title for _, title in headings],
+                    'heading': headings[-1][1] if headings else '',
+                    'section_index': len(documents), 'line_start': start, 'line_end': end,
+                }))
+            body.clear()
+
+        while index < len(lines):
+            line = lines[index]
+            marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
+            if fence:
+                body.append(line)
+                if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                    fence = None
+                index += 1
+                continue
+            if marker and (marker[1][0] != '`' or '`' not in marker[2]):
+                fence = marker[1]
+                body.append(line)
+                index += 1
+                continue
+            heading = re.match(r'^ {0,3}(#{1,6})(?:[ \t]+(.*?)|[ \t]*)$', line)
+            underline = (re.fullmatch(r' {0,3}(=+|-+)[ \t]*', lines[index + 1])
+                         if index + 1 < len(lines) and line.strip() and not line.startswith(('    ', '\t')) else None)
+            if heading or underline:
+                flush(index)
+                level = len(heading[1]) if heading else (1 if underline[1][0] == '=' else 2)
+                title = re.sub(r'[ \t]+#+[ \t]*$', '', heading[2] or '').strip() if heading else line.strip()
+                while headings and headings[-1][0] >= level:
+                    headings.pop()
+                headings.append((level, title))
+                index += 1 if heading else 2
+                start = index + 1
+            else:
+                body.append(line)
+                index += 1
+        flush(len(lines))
+        if not documents:
+            raise ValueError('Markdown 没有可索引正文')
+        return documents
+
+    def inspect(self, data: bytes) -> dict:
+        documents = self.documents(data, AdapterOptions())
+        return {'supported': True, 'sections': len(documents),
+                'headings': [d.metadata['heading'] for d in documents]}
+
+
 class DocxAdapter(SourceAdapter):
     kind = 'docx'
     ns: ClassVar[dict[str, str]] = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
@@ -187,5 +280,5 @@ class AdapterRegistry:
 
 
 registry = AdapterRegistry()
-for adapter in (PlainTextAdapter(), JsonAdapter(), DocxAdapter()):
+for adapter in (PlainTextAdapter(), JsonAdapter(), CsvAdapter(), MarkdownAdapter(), DocxAdapter()):
     registry.register(adapter)
