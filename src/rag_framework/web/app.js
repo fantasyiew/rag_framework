@@ -210,6 +210,9 @@ const sourceOptions = () => ({content_fields: Array.from($('source-options').que
 const pdfOption = el('option', 'PDF（文本层，不含 OCR）'); pdfOption.value = 'pdf';
 $('source-kind').append(pdfOption);
 $('source-file').accept += ',.pdf';
+const htmlOption = el('option', 'HTML（本地文件，不执行脚本）'); htmlOption.value = 'html';
+$('source-kind').append(htmlOption);
+$('source-file').accept += ',.html,.htm';
 $('source-upload').onsubmit = event => formTask(event, async () => {
   selectedSource = null; $('source-ingest').hidden = true; $('source-options').replaceChildren(); $('source-preview').replaceChildren();
   const file = $('source-file').files[0]; if (!file) throw new Error('请选择文件');

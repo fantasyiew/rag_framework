@@ -96,7 +96,7 @@ P0-A 基线与统一装配
 
 1. CSV 与结构化 Markdown Adapter（已完成，边界见 source-formats.md）。
 2. 上传式 PDF 文本解析（已完成）；OCR 作为独立可选能力，尚未实现。
-3. HTML 文件解析；URL 抓取作为独立 Connector，并加入 SSRF、重定向、大小和超时限制。
+3. HTML 文件解析（已完成）；URL 抓取作为独立 Connector（待实施），并加入 SSRF、重定向、大小和超时限制。
 4. 本地 sentence-transformers 与其他远程 Embedder。
 5. 第二个 VectorStore 后端，用于验证契约是否真正解耦。
 6. 检索指标和回答指标注册表。
@@ -138,4 +138,4 @@ P0-A 基线与统一装配
 
 ## 10. 下一步执行建议
 
-下一次实现 P3 的 HTML 文件解析。URL 抓取需独立规划安全边界，不随 HTML 解析自动启用。Preset 格式与覆盖顺序见 presets.md，索引迁移规则见 index-safety.md。
+HTML 文件解析已完成。下一步可实现本地 sentence-transformers Embedder；URL Connector 仍需独立规划安全边界，不随 HTML 解析启用。Preset 格式与覆盖顺序见 presets.md，索引迁移规则见 index-safety.md。

@@ -1,4 +1,13 @@
-# 扩展数据源：CSV、Markdown 与 PDF
+# 扩展数据源：CSV、Markdown、PDF 与 HTML
+
+## HTML
+
+- 上传选择 HTML，API 使用 `kind=html`；支持 UTF-8（含 BOM）的 `.html` / `.htm` 文件及 HTML 片段，最多 10 MB。使用标准库 HTMLParser，无新增依赖。
+- 提取纯文本，按 h1–h6 分节；元数据保留页面 title（最多 1000 字符）、heading_path、heading、section_index。标题只作为元数据，正文交由当前 Chunker 分块。
+- 解码 HTML 字符实体，保留常见块级元素的换行，压缩空白。链接只保留显示文字，表格只提取文字，不恢复结构或保留代码缩进。
+- 排除 script、style、template、noscript、iframe、object、svg 内容和 head 非标题内容；不执行脚本，不渲染 HTML，不访问链接、图片、样式、附件或外部实体。正文预览沿用纯文本显示。
+- 不是浏览器 DOM / CSS 布局解析器：不会执行 JS、判断 CSS 隐藏状态或自动去除导航广告；不保证严重损坏标签的浏览器级恢复。只有标题或动态脚本、没有正文时拒绝入库。
+- 本阶段没有 URL 抓取。后续 Connector 需独立实现 SSRF、重定向、大小和超时限制。
 
 ## PDF
 

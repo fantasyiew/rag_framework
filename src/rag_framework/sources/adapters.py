@@ -5,6 +5,7 @@ import json
 import re
 import zipfile
 from abc import ABC, abstractmethod
+from html.parser import HTMLParser
 from typing import ClassVar
 from xml.etree import ElementTree as ET
 
@@ -328,6 +329,115 @@ class PdfAdapter(SourceAdapter):
         return self.parse(data)[0]
 
 
+class _HtmlTextParser(HTMLParser):
+    """Extract text, never render markup or resolve external resources."""
+
+    ignored: ClassVar[set[str]] = {'script', 'style', 'template', 'noscript', 'iframe', 'object', 'svg'}
+    blocks: ClassVar[set[str]] = {'p', 'div', 'section', 'article', 'li', 'ul', 'ol', 'table', 'tr',
+              'blockquote', 'pre', 'main', 'header', 'footer', 'nav', 'br', 'hr'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.suppressed = []
+        self.in_head = False
+        self.in_title = False
+        self.title = []
+        self.heading = None
+        self.heading_text = []
+        self.path = []
+        self.body = []
+        self.sections = []
+
+    def flush(self):
+        content = '\n'.join(' '.join(line.split()) for line in ''.join(self.body).splitlines())
+        content = '\n'.join(line for line in content.splitlines() if line)
+        if content:
+            self.sections.append((content, [name for _, name in self.path]))
+        self.body.clear()
+
+    def finish_heading(self):
+        if self.heading is not None:
+            title = ' '.join(''.join(self.heading_text).split())
+            while self.path and self.path[-1][0] >= self.heading:
+                self.path.pop()
+            if title:
+                self.path.append((self.heading, title))
+            self.heading = None
+            self.heading_text.clear()
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.ignored:
+            self.suppressed.append(tag)
+        if self.suppressed:
+            return
+        if tag == 'head':
+            self.in_head = True
+        if tag == 'title':
+            self.in_title = True
+        if self.in_head or self.in_title:
+            return
+        if re.fullmatch(r'h[1-6]', tag):
+            self.finish_heading()
+            self.flush()
+            self.heading = int(tag[1])
+        elif tag in self.blocks:
+            self.finish_heading()
+            self.body.append('\n')
+        elif tag in {'td', 'th'}:
+            self.body.append(' ')
+
+    def handle_endtag(self, tag):
+        if self.suppressed:
+            if tag == self.suppressed[-1]:
+                self.suppressed.pop()
+            return
+        if tag == 'title':
+            self.in_title = False
+        if tag == 'head':
+            self.in_head = False
+        if self.in_head:
+            return
+        if re.fullmatch(r'h[1-6]', tag):
+            self.finish_heading()
+        elif tag in self.blocks:
+            self.body.append('\n')
+
+    def handle_data(self, data):
+        if self.suppressed:
+            return
+        if self.in_title:
+            self.title.append(data)
+        elif not self.in_head:
+            (self.heading_text if self.heading is not None else self.body).append(data)
+
+
+class HtmlAdapter(SourceAdapter):
+    kind = 'html'
+
+    def documents(self, data: bytes, options: AdapterOptions) -> list[Document]:
+        if len(data) > 10_000_000:
+            raise ValueError('HTML 文件不能超过 10 MB')
+        parser = _HtmlTextParser()
+        parser.feed(text(data))
+        parser.close()
+        parser.finish_heading()
+        parser.flush()
+        title = ' '.join(''.join(parser.title).split())[:1000]
+        documents = [Document(content=content, metadata={
+            'source_type': self.kind, 'title': title, 'heading_path': path,
+            'heading': path[-1] if path else '', 'section_index': index,
+        }) for index, (content, path) in enumerate(parser.sections)]
+        if not documents:
+            raise ValueError('HTML 没有可索引正文；不支持执行 JavaScript 生成内容')
+        return documents
+
+    def inspect(self, data: bytes) -> dict:
+        documents = self.documents(data, AdapterOptions())
+        return {'supported': True, 'sections': len(documents),
+                'title': documents[0].metadata['title'],
+                'headings': [d.metadata['heading'] for d in documents]}
+
+
 class AdapterRegistry:
     def __init__(self):
         self.adapters: dict[str, SourceAdapter] = {}
@@ -342,5 +452,6 @@ class AdapterRegistry:
 
 
 registry = AdapterRegistry()
-for adapter in (PlainTextAdapter(), JsonAdapter(), CsvAdapter(), MarkdownAdapter(), DocxAdapter(), PdfAdapter()):
+for adapter in (PlainTextAdapter(), JsonAdapter(), CsvAdapter(), MarkdownAdapter(),
+                DocxAdapter(), PdfAdapter(), HtmlAdapter()):
     registry.register(adapter)
