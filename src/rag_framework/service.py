@@ -104,7 +104,9 @@ def build_service(settings: Settings) -> ServiceRuntime:
 
     def runtime_factory(knowledge_base_id: str) -> KnowledgeBaseRuntime:
         suffix = "" if knowledge_base_id == "default" else f"_{knowledge_base_id}"
-        collection = f"{settings.chroma_collection}{suffix}"
+        base_collection = settings.qdrant_collection if settings.vector_backend == 'qdrant' else settings.chroma_collection
+        vector_directory = settings.qdrant_directory if settings.vector_backend == 'qdrant' else settings.chroma_directory
+        collection = f"{base_collection}{suffix}"
         index_name = f"{settings.elasticsearch_index}{suffix}"
         runtime_vector_store = build_vector_store(settings, collection_name=collection)
         runtime_keyword_store = create_keyword_store(settings, index_name=index_name)
@@ -118,7 +120,7 @@ def build_service(settings: Settings) -> ServiceRuntime:
             "vector": {"backend": settings.vector_backend,
                        "implementation": type(runtime_vector_store).__module__ + "." + type(runtime_vector_store).__qualname__,
                        "collection": collection,
-                       "directory": str(settings.chroma_directory.resolve())},
+                       "directory": str(vector_directory.resolve())},
             "keyword": {"backend": settings.keyword_backend,
                         "implementation": type(runtime_keyword_store).__name__, "index": index_name,
                         "endpoint_digest": hashlib.sha256(settings.elasticsearch_url.encode()).hexdigest()},

@@ -1,5 +1,8 @@
 # RAG Framework
 
+可选第二向量后端：`RAG_VECTOR_BACKEND=qdrant`，本批支持本地持久化模式。
+安装与切换说明见 [Qdrant 后端](docs/qdrant.md)，默认 Chroma 不变。
+
 本地嵌入支持 `RAG_EMBEDDING_MODE=sentence_transformers`，默认只读取本地模型。
 安装与索引兼容边界见 [本地嵌入说明](docs/local-embeddings.md)。
 

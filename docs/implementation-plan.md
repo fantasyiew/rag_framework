@@ -98,7 +98,7 @@ P0-A 基线与统一装配
 2. 上传式 PDF 文本解析（已完成）；OCR 作为独立可选能力，尚未实现。
 3. HTML 文件解析（已完成）；URL 抓取作为独立 Connector（待实施），并加入 SSRF、重定向、大小和超时限制。
 4. 本地 sentence-transformers（代码与模拟测试完成，真实模型待验收）与其他远程 Embedder（待扩展）。
-5. 第二个 VectorStore 后端，用于验证契约是否真正解耦。
+5. 第二个 VectorStore 后端（Qdrant 本地模式已完成），用于验证契约是否真正解耦。
 6. 检索指标和回答指标注册表。
 7. WeightedSum、RRS 和额外 Reranker Provider。
 
@@ -138,4 +138,4 @@ P0-A 基线与统一装配
 
 ## 10. 下一步执行建议
 
-本地 sentence-transformers 已接入，真实模型待选择后验收。下一步可引入第二个 VectorStore 后端验证契约；URL Connector 仍需独立规划安全边界。Preset 格式与覆盖顺序见 presets.md，索引迁移规则见 index-safety.md。
+Qdrant 本地后端已接入并通过真实本地存储测试。下一步实现检索指标和回答指标注册表；真实本地嵌入模型验收与 URL Connector 安全设计仍待单独处理。

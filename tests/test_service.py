@@ -1,13 +1,19 @@
 from unittest.mock import AsyncMock
 
+import pytest
+
 from rag_framework.config import Settings
 from rag_framework.core.models import Document
 from rag_framework.service import build_service
 
 
-async def test_runtime_isolates_knowledge_bases_and_closes_once(tmp_path):
+@pytest.mark.parametrize('backend', ['chroma', 'qdrant'])
+async def test_runtime_isolates_knowledge_bases_and_closes_once(tmp_path, backend):
+    if backend == 'qdrant':
+        pytest.importorskip('qdrant_client')
     config = Settings(
         _env_file=None, query_planner_mode='heuristic', answer_generator_mode='extractive',
+        vector_backend=backend, qdrant_directory=tmp_path / 'qdrant',
         evaluation_judge_mode='heuristic', reranker_mode='disabled', keyword_backend='memory',
         chroma_directory=tmp_path / 'chroma', source_directory=tmp_path / 'sources',
         knowledge_base_directory=tmp_path / 'bases',

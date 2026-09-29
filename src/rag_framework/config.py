@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     embedding_query_prefix: str = ""
     embedding_document_prefix: str = ""
     vector_backend: str = "chroma"
+    qdrant_directory: Path = Path("data/qdrant")
+    qdrant_collection: str = "documents"
     default_top_k: int = Field(default=8, ge=1, le=100)
     chunker_mode: str = Field(default="character", min_length=1)
     chunk_size: int = Field(default=800, gt=0)
