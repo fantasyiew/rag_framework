@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=800, gt=0)
     chunk_overlap: int = Field(default=120, ge=0)
     fusion_mode: str = Field(default="rrf", min_length=1)
+    fusion_weights: dict[str, float] = Field(default_factory=dict)
+    fusion_normalization: Literal['min_max'] = 'min_max'
     fusion_rank_constant: int | None = Field(default=None, ge=0)
     default_retrieval_strategy: Literal["vector", "keyword", "hybrid"] = "hybrid"
     default_retrieval_rerank: bool = True

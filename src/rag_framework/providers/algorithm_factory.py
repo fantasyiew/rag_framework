@@ -5,7 +5,7 @@ from typing import Generic, TypeVar
 
 from rag_framework.config import Settings
 from rag_framework.contracts.providers import Chunker, Fusion
-from rag_framework.pipeline.fusion import RRFFusion
+from rag_framework.pipeline.fusion import RRFFusion, WeightedSumFusion
 from rag_framework.pipeline.indexing import CharacterChunker
 
 T = TypeVar("T")
@@ -34,6 +34,7 @@ chunkers = AlgorithmRegistry(Chunker)
 fusions = AlgorithmRegistry(Fusion)
 chunkers.register("character", lambda s: CharacterChunker(s.chunk_size, s.chunk_overlap))
 fusions.register("rrf", lambda s: RRFFusion(s.effective_fusion_rank_constant))
+fusions.register("weighted_sum", lambda s: WeightedSumFusion(s.fusion_weights, s.fusion_normalization))
 
 
 def build_chunker(settings: Settings) -> Chunker:

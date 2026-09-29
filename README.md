@@ -1,5 +1,8 @@
 # RAG Framework
 
+混合检索新增 `RAG_FUSION_MODE=weighted_sum`，使用明确的 min-max 归一化；
+默认 RRF 不变，详见 [融合配置与分数说明](docs/fusion.md)。
+
 评估支持 `RAG_EVALUATION_METRICS` 指标扩展配置，结果保存在完整报告的
 `metric_extensions`；原固定指标保持兼容。见 [指标注册表](docs/metric-registry.md)。
 

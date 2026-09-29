@@ -100,7 +100,7 @@ P0-A 基线与统一装配
 4. 本地 sentence-transformers（代码与模拟测试完成，真实模型待验收）与其他远程 Embedder（待扩展）。
 5. 第二个 VectorStore 后端（Qdrant 本地模式已完成），用于验证契约是否真正解耦。
 6. 检索指标和回答指标注册表（兼容扩展层已完成，动态 UI/异步插件待后续）。
-7. WeightedSum、RRS 和额外 Reranker Provider。
+7. WeightedSum（已完成）；RRS 与额外 Reranker Provider（公式/协议待确认，未实现）。
 
 ## 8. 测试策略
 
@@ -138,4 +138,4 @@ P0-A 基线与统一装配
 
 ## 10. 下一步执行建议
 
-指标注册表兼容扩展层已完成，下一步评估额外融合算法与重排 Provider；真实本地嵌入模型验收与 URL Connector 安全设计仍待单独处理。
+WeightedSum 已完成。下一步确认 RRS 数学定义与额外重排协议，或优先开展真实模型和端到端验收；URL Connector 安全设计仍待单独处理。
