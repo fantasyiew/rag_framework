@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=10, ge=1)
     embedding_request_timeout: float = Field(default=30.0, gt=0)
     embedding_send_dimensions: bool = True
+    embedding_device: str = "cpu"
+    embedding_local_files_only: bool = True
+    embedding_normalize: bool = True
+    embedding_query_prefix: str = ""
+    embedding_document_prefix: str = ""
     vector_backend: str = "chroma"
     default_top_k: int = Field(default=8, ge=1, le=100)
     chunker_mode: str = Field(default="character", min_length=1)

@@ -1,5 +1,14 @@
 # 实施进度
 
+## 2026-09-29 · P3 本地嵌入 Provider
+
+- 状态：代码与模拟模型测试完成；真实模型效果/性能待用户选择模型后验证。
+- 改动：sentence_transformers 注册工厂、延迟加载、线程串行推理、维度和数值校验、显式 query/document 前缀。
+- 配置：新增 device、local_files_only、normalize、query_prefix、document_prefix；可选 embedding 依赖，不自动安装 Torch 或下载模型。
+- 兼容性：默认 hash/auto 行为不变，本地模式失败不回退；归一化与前缀纳入索引指纹。模型权重不做文件哈希，替换时需更新 revision。
+- 验证：154 passed、4 skipped；Ruff 与前端语法检查通过。测试模拟模型加载、参数、并发调用、维度/无效数值/加载失败和指纹变化；未运行真实模型或修改当前知识库。
+- 下一步：第二个 VectorStore 后端的契约验证；URL Connector 仍单独规划。
+
 ## 2026-09-29 · P3 第三批：HTML 文件解析
 
 - 状态：本批完成；URL Connector 与其他 P3 扩展待实施。

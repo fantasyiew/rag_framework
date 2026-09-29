@@ -1,5 +1,8 @@
 # RAG Framework
 
+本地嵌入支持 `RAG_EMBEDDING_MODE=sentence_transformers`，默认只读取本地模型。
+安装与索引兼容边界见 [本地嵌入说明](docs/local-embeddings.md)。
+
 P3 已支持 CSV、结构化 Markdown、HTML 文件与 PDF 文本层导入。HTML 不执行脚本或抓取 URL。PDF 通过新增的 pypdf
 依赖解析，不含 OCR；更新依赖并重启服务后可从 UI 选择 PDF。
 格式、元数据与限制见 [数据源说明](docs/source-formats.md)。

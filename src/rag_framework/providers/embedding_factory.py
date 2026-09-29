@@ -11,6 +11,7 @@ from rag_framework.contracts.providers import Embedder
 from rag_framework.core.vectors import EmbeddingError, validate_vectors
 from rag_framework.providers.algorithm_factory import AlgorithmRegistry
 from rag_framework.providers.hash_embedder import HashEmbedder
+from rag_framework.providers.local_embedder import SentenceTransformerEmbedder
 
 
 class CompatibleEmbedder(Embedder):
@@ -69,6 +70,7 @@ class EmbeddingRuntime:
 embedders = AlgorithmRegistry(Embedder)
 embedders.register("hash", lambda s: HashEmbedder(s.embedding_dimensions))
 embedders.register("compatible", CompatibleEmbedder)
+embedders.register("sentence_transformers", SentenceTransformerEmbedder)
 
 
 def build_embedder(settings: Settings) -> EmbeddingRuntime:
@@ -84,6 +86,14 @@ def build_embedder(settings: Settings) -> EmbeddingRuntime:
         "endpoint_digest": hashlib.sha256((settings.embedding_base_url or "").rstrip("/").encode()).hexdigest()
             if mode != "hash" else None,
     }
+    if mode == "sentence_transformers":
+        fingerprint.update(
+            endpoint_digest=None,
+            normalize=settings.embedding_normalize,
+            query_prefix=settings.embedding_query_prefix,
+            document_prefix=settings.embedding_document_prefix,
+            encoding="encode-float32-v1",
+        )
     return EmbeddingRuntime(embedder, fingerprint, settings.embedding_mode, mode,
                             "No embedding credentials; selected hash" if
                             settings.embedding_mode == "auto" and mode == "hash" else None)
