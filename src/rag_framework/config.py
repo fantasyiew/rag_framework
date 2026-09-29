@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     generation_max_tokens: int = Field(default=1024, ge=1)
     generation_max_context_chunks: int = Field(default=8, ge=1, le=100)
     evaluation_concurrency: int = Field(default=4, ge=1, le=32)
+    evaluation_metrics: str = ""
     evaluation_report_limit: int = Field(default=100, ge=1, le=10000)
     evaluation_report_directory: Path = Path("data/evaluation/reports")
     evaluation_dataset_directory: Path = Path("data/evaluation/datasets")

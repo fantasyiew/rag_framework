@@ -64,6 +64,17 @@ class EvaluationGenerator(AnswerGenerator):
         yield await self.generate(query, contexts)
 
 
+async def test_registered_answer_metrics_and_missing_reference():
+    evaluator = RAGEvaluator(GenerationPipeline(EvaluationRetriever(), EvaluationGenerator()),
+        EvaluationStore(), metrics='answer.reference_similarity,answer.groundedness,retrieval.mrr')
+    report = await evaluator.evaluate(RAGEvaluationRequest(cases=[EvaluationCase(
+        query=Query(text='How tall is Tokyo Tower?'), relevant_chunk_ids=['relevant'])]))
+    assert report.status == 'complete'
+    assert report.metric_extensions['answer.reference_similarity'] is None
+    assert report.metric_extensions['answer.groundedness'] == report.answer_metrics.groundedness
+    assert report.metric_extensions['retrieval.mrr.delta'] == 0.5
+
+
 def test_answer_quality_scores_grounding_relevancy_and_citations() -> None:
     context = _result("relevant", "Tokyo Tower is 333 meters tall.", 1)
     trace = RetrievalTrace(query=Query(text="How tall is Tokyo Tower?"), final_context=[context])

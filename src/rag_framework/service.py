@@ -69,6 +69,7 @@ class ServiceRuntime:
             self.knowledge_bases.runtime(knowledge_base_id).retriever,
             self.evaluation_store, concurrency=self.settings.evaluation_concurrency,
             config_snapshot=self.audit_snapshot(),
+            metrics=self.settings.evaluation_metrics,
         )
 
     def rag_evaluator(self, knowledge_base_id: str = "default"):
@@ -76,6 +77,7 @@ class ServiceRuntime:
             self.knowledge_bases.runtime(knowledge_base_id).generation_pipeline,
             self.evaluation_store, concurrency=self.settings.evaluation_concurrency,
             judge=self.judge_runtime.judge,
+            metrics=self.settings.evaluation_metrics,
             config_snapshot=self.audit_snapshot(),
         )
 
@@ -95,6 +97,8 @@ class ServiceRuntime:
 
 
 def build_service(settings: Settings) -> ServiceRuntime:
+    from rag_framework.evaluation.registry import select_metrics
+    select_metrics(settings.evaluation_metrics)
     embedding = build_embedder(settings)
     embedder = embedding.embedder
     planner_runtime = build_query_planner(settings)

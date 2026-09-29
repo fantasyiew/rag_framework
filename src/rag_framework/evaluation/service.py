@@ -25,6 +25,7 @@ from .models import (
     RetrievalEvaluationRequest,
     RetrievalMetrics,
 )
+from .registry import average_extensions, retrieval_extensions, select_metrics
 
 
 class EvaluationStore:
@@ -105,6 +106,7 @@ class RetrievalEvaluator:
         *,
         concurrency: int = 4,
         config_snapshot: dict | None = None,
+        metrics: str = "",
     ) -> None:
         if concurrency < 1:
             raise ValueError("Evaluation concurrency must be positive")
@@ -112,6 +114,7 @@ class RetrievalEvaluator:
         self.store = store
         self.concurrency = concurrency
         self.config_snapshot = config_snapshot
+        self.metric_names, _ = select_metrics(metrics)
 
     async def evaluate(self, request: RetrievalEvaluationRequest) -> RetrievalEvaluationReport:
         started_at = time()
@@ -133,6 +136,7 @@ class RetrievalEvaluator:
             else "failed"
         )
         report = RetrievalEvaluationReport(
+            metric_extensions=average_extensions(results),
             config_snapshot=self.config_snapshot,
             knowledge_base_id=request.knowledge_base_id,
             status=status,
@@ -159,6 +163,7 @@ class RetrievalEvaluator:
             before = compute_retrieval_metrics(before_ids, relevant, k=request.k)
             after = compute_retrieval_metrics(after_ids, relevant, k=request.k)
             return EvaluationCaseResult(
+                metric_extensions=retrieval_extensions(self.metric_names, before_ids, after_ids, relevant, request.k),
                 case_id=case.id,
                 query=case.query.text,
                 relevant_chunk_ids=case.relevant_chunk_ids,

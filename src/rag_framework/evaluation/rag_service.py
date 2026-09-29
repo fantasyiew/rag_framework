@@ -18,6 +18,8 @@ from .models import (
     RAGEvaluationReport,
     RAGEvaluationRequest,
 )
+from .registry import AnswerMetricInput, average_extensions, retrieval_extensions, select_metrics
+from .registry import answer_metrics as metric_registry
 from .service import EvaluationStore, average_metric_comparisons
 
 
@@ -30,6 +32,7 @@ class RAGEvaluator:
         concurrency: int = 4,
         judge: AnswerJudge | None = None,
         config_snapshot: dict | None = None,
+        metrics: str = "",
     ) -> None:
         if concurrency < 1:
             raise ValueError("Evaluation concurrency must be positive")
@@ -38,6 +41,7 @@ class RAGEvaluator:
         self.concurrency = concurrency
         self.judge = judge or HeuristicAnswerJudge()
         self.config_snapshot = config_snapshot
+        self.retrieval_metric_names, self.answer_metric_names = select_metrics(metrics)
 
     async def evaluate(self, request: RAGEvaluationRequest) -> RAGEvaluationReport:
         started_at = time()
@@ -69,6 +73,7 @@ class RAGEvaluator:
             if result.answer_metrics is not None
         ]
         report = RAGEvaluationReport(
+            metric_extensions=average_extensions(results),
             config_snapshot=self.config_snapshot,
             knowledge_base_id=request.knowledge_base_id,
             status=status,
@@ -96,13 +101,20 @@ class RAGEvaluator:
             response = await self.pipeline.run(case.query)
             trace = response.retrieval
             retrieval_metrics = _retrieval_comparison(case, trace.candidates, trace.final_context, request.k)
+            judged = await self.judge.evaluate(case, response)
+            extensions = retrieval_extensions(self.retrieval_metric_names,
+                [item.chunk.id for item in trace.candidates[:request.k]],
+                [item.chunk.id for item in trace.final_context[:request.k]],
+                set(case.relevant_chunk_ids), request.k)
+            extensions.update(metric_registry.evaluate(self.answer_metric_names, AnswerMetricInput(case, response, judged)))
             return RAGEvaluationCaseResult(
+                metric_extensions=extensions,
                 case_id=case.id,
                 query=case.query.text,
                 relevant_chunk_ids=case.relevant_chunk_ids,
                 reference_answer=case.reference_answer,
                 retrieval_metrics=retrieval_metrics,
-                answer_metrics=await self.judge.evaluate(case, response),
+                answer_metrics=judged,
                 answer=response.answer,
                 trace_id=trace.id,
                 trace=trace if request.include_trace else None,

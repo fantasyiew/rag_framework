@@ -1,5 +1,8 @@
 # RAG Framework
 
+评估支持 `RAG_EVALUATION_METRICS` 指标扩展配置，结果保存在完整报告的
+`metric_extensions`；原固定指标保持兼容。见 [指标注册表](docs/metric-registry.md)。
+
 可选第二向量后端：`RAG_VECTOR_BACKEND=qdrant`，本批支持本地持久化模式。
 安装与切换说明见 [Qdrant 后端](docs/qdrant.md)，默认 Chroma 不变。
 

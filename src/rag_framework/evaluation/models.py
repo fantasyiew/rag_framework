@@ -112,6 +112,7 @@ class AnswerQualityMetrics(BaseModel):
 
 
 class EvaluationCaseResult(BaseModel):
+    metric_extensions: dict[str, float | None] = Field(default_factory=dict)
     case_id: str
     query: str
     relevant_chunk_ids: list[str]
@@ -124,6 +125,7 @@ class EvaluationCaseResult(BaseModel):
 
 
 class RetrievalEvaluationReport(BaseModel):
+    metric_extensions: dict[str, float | None] = Field(default_factory=dict)
     config_snapshot: dict[str, Any] | None = None
     knowledge_base_id: str = "default"
     kind: Literal["retrieval"] = "retrieval"
@@ -153,6 +155,7 @@ class EvaluationReportSummary(BaseModel):
 
 
 class RAGEvaluationCaseResult(BaseModel):
+    metric_extensions: dict[str, float | None] = Field(default_factory=dict)
     case_id: str
     query: str
     relevant_chunk_ids: list[str]
@@ -166,6 +169,7 @@ class RAGEvaluationCaseResult(BaseModel):
 
 
 class RAGEvaluationReport(BaseModel):
+    metric_extensions: dict[str, float | None] = Field(default_factory=dict)
     config_snapshot: dict[str, Any] | None = None
     knowledge_base_id: str = "default"
     kind: Literal["rag"] = "rag"

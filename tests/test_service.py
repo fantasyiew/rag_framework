@@ -14,6 +14,7 @@ async def test_runtime_isolates_knowledge_bases_and_closes_once(tmp_path, backen
     config = Settings(
         _env_file=None, query_planner_mode='heuristic', answer_generator_mode='extractive',
         vector_backend=backend, qdrant_directory=tmp_path / 'qdrant',
+        evaluation_metrics='retrieval.mrr',
         evaluation_judge_mode='heuristic', reranker_mode='disabled', keyword_backend='memory',
         chroma_directory=tmp_path / 'chroma', source_directory=tmp_path / 'sources',
         knowledge_base_directory=tmp_path / 'bases',
@@ -39,6 +40,8 @@ async def test_runtime_isolates_knowledge_bases_and_closes_once(tmp_path, backen
         )
     )
     assert report.knowledge_base_id == other_id
+    assert report.metric_extensions['retrieval.mrr.after'] == 0.0
+    assert service.evaluation_store.get(report.id).metric_extensions == report.metric_extensions
     assert report.config_snapshot["config_hash"] == service.audit_snapshot()["config_hash"]
     assert service.evaluation_store.get(report.id).config_snapshot == report.config_snapshot
     close = AsyncMock()
