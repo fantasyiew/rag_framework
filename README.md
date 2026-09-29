@@ -1,5 +1,9 @@
 # RAG Framework
 
+P3 已支持 CSV、结构化 Markdown 与 PDF 文本层导入。PDF 通过新增的 pypdf
+依赖解析，不含 OCR；更新依赖并重启服务后可从 UI 选择 PDF。
+格式、元数据与限制见 [数据源说明](docs/source-formats.md)。
+
 P2 支持版本化 JSON Preset：通过 `RAG_SERVICE_PRESET` 加载；
 `GET /v1/config/preset` 导出，`POST /v1/config/preset/validate` 校验，
 `GET /v1/config/snapshot` 查看脱敏快照。评估报告保存配置快照与知识库 ID。

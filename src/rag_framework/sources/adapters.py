@@ -266,6 +266,68 @@ class DocxAdapter(SourceAdapter):
                 'headings': [d.metadata['heading'] for d in documents]}
 
 
+class PdfInputError(ValueError):
+    """Safe, user-facing PDF validation message."""
+
+
+class PdfAdapter(SourceAdapter):
+    """Text-layer extraction only; one canonical document per nonempty page."""
+
+    kind = 'pdf'
+    max_pages = 500
+    max_stream_bytes = 5_000_000
+    max_characters = 2_000_000
+
+    def parse(self, data: bytes) -> tuple[list[Document], dict]:
+        from pypdf import PdfReader
+
+        if len(data) > 10_000_000 or not data.startswith(b'%PDF-'):
+            raise ValueError('请提供不超过 10 MB 的 PDF 文件')
+        documents, empty_pages = [], []
+        try:
+            reader = PdfReader(io.BytesIO(data), strict=True)
+            if reader.is_encrypted:
+                raise PdfInputError('暂不支持加密 PDF，请先解密后上传')
+            page_count = len(reader.pages)
+            if not 0 < page_count <= self.max_pages:
+                raise PdfInputError('PDF 页数必须为 1–500 页')
+            title = str((reader.metadata or {}).get('/Title', ''))[:1000]
+            characters = 0
+            for number, page in enumerate(reader.pages, 1):
+                stream = page.get_contents()
+                if stream is not None and len(stream.get_data()) > self.max_stream_bytes:
+                    raise PdfInputError('PDF 单页解压内容超过 5 MB，请拆分或简化文件')
+                content = (page.extract_text() or '').strip()
+                characters += len(content)
+                if characters > self.max_characters:
+                    raise PdfInputError('PDF 提取正文超过 200 万字符')
+                if not content:
+                    empty_pages.append(number)
+                    continue
+                documents.append(Document(content=content, metadata={
+                    'source_type': self.kind, 'page_number': number,
+                    'page_count': page_count, 'title': title,
+                }))
+        except PdfInputError:
+            raise
+        except Exception as exc:
+            # Parser diagnostics can contain source data: return a stable public error.
+            raise ValueError('无法解析 PDF，文件可能损坏或使用了不支持的结构') from exc
+        if not documents:
+            raise ValueError('PDF 没有可提取文本，可能是扫描件；当前不支持 OCR')
+        return documents, {
+            'supported': True, 'page_count': page_count, 'document_count': len(documents),
+            'empty_pages': empty_pages,
+            'warnings': ['部分页面未提取到文本，已跳过；扫描图片需要 OCR'] if empty_pages else [],
+        }
+
+    def inspect(self, data: bytes) -> dict:
+        return self.parse(data)[1]
+
+    def documents(self, data: bytes, options: AdapterOptions) -> list[Document]:
+        return self.parse(data)[0]
+
+
 class AdapterRegistry:
     def __init__(self):
         self.adapters: dict[str, SourceAdapter] = {}
@@ -280,5 +342,5 @@ class AdapterRegistry:
 
 
 registry = AdapterRegistry()
-for adapter in (PlainTextAdapter(), JsonAdapter(), CsvAdapter(), MarkdownAdapter(), DocxAdapter()):
+for adapter in (PlainTextAdapter(), JsonAdapter(), CsvAdapter(), MarkdownAdapter(), DocxAdapter(), PdfAdapter()):
     registry.register(adapter)

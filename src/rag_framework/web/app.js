@@ -207,11 +207,15 @@ sourcesPage.innerHTML = `<div class="heading"><div><p class="eyebrow">KNOWLEDGE 
 <article class="panel pad"><form id="source-upload"><label>格式<select id="source-kind"><option value="text">纯文本（UTF-8）</option><option value="json">JSON 对象或对象数组</option><option value="csv">CSV（UTF-8，逗号分隔）</option><option value="markdown">Markdown（按标题分节）</option><option value="docx">Word DOCX</option></select></label><label>文件<input id="source-file" type="file" accept=".txt,.md,.markdown,.csv,.json,.docx" required></label><button class="primary">解析文件</button></form><p class="muted">上限 10 MB。CSV 首行为表头，解析后勾选正文字段；Markdown 保留标题路径与行号。JSON 支持一维标量数组，不支持对象嵌套；DOCX 暂不处理图片和 OCR。</p><div id="source-options"></div><div id="source-preview"></div><button id="source-ingest" class="primary" hidden>确认入库</button></article><article class="panel pad"><h2>原始数据与写入记录</h2><button id="source-refresh">刷新记录</button><div id="source-records"></div></article>`;
 document.querySelector('main').append(sourcesPage);
 const sourceOptions = () => ({content_fields: Array.from($('source-options').querySelectorAll('input:checked')).map(node => node.value)});
+const pdfOption = el('option', 'PDF（文本层，不含 OCR）'); pdfOption.value = 'pdf';
+$('source-kind').append(pdfOption);
+$('source-file').accept += ',.pdf';
 $('source-upload').onsubmit = event => formTask(event, async () => {
   selectedSource = null; $('source-ingest').hidden = true; $('source-options').replaceChildren(); $('source-preview').replaceChildren();
   const file = $('source-file').files[0]; if (!file) throw new Error('请选择文件');
   selectedSource = await api(`${kbPath('/sources')}?name=${encodeURIComponent(file.name)}&kind=${$('source-kind').value}`, {method:'POST', body:file});
   const info = selectedSource.inspection;
+  (info.warnings || []).forEach(warning => $('source-options').append(el('p', `${warning}。页码：${(info.empty_pages || []).join(', ')}`, 'muted')));
   if (!info.supported) { notice(`${info.reason}：${info.nested_fields.join(', ')}`, true); await loadSources(); return; }
   if (info.fields) {
     $('source-options').append(el('p', '勾选正文内容字段；其余字段保存在 Document.metadata.raw_metadata。'));

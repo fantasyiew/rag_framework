@@ -2,7 +2,7 @@
 
 > 对应需求：`docs/iteration-requirements.md` v0.2.1  
 > 创建日期：2026-09-27  
-> 当前状态：P0-A、P0-B、P1、P2 已完成；P3 第一批 CSV / Markdown 已完成，其余待实施
+> 当前状态：P0-A、P0-B、P1、P2 已完成；P3 CSV / Markdown / PDF 文本解析已完成，其余待实施
 
 ## 1. 实施目标
 
@@ -95,7 +95,7 @@ P0-A 基线与统一装配
 ### 建议顺序
 
 1. CSV 与结构化 Markdown Adapter（已完成，边界见 source-formats.md）。
-2. 上传式 PDF 文本解析；OCR 作为独立可选能力。
+2. 上传式 PDF 文本解析（已完成）；OCR 作为独立可选能力，尚未实现。
 3. HTML 文件解析；URL 抓取作为独立 Connector，并加入 SSRF、重定向、大小和超时限制。
 4. 本地 sentence-transformers 与其他远程 Embedder。
 5. 第二个 VectorStore 后端，用于验证契约是否真正解耦。
@@ -138,4 +138,4 @@ P0-A 基线与统一装配
 
 ## 10. 下一步执行建议
 
-下一次实现 P3 的上传式 PDF 文本解析，OCR 保持独立可选能力。Preset 格式与覆盖顺序见 presets.md，索引迁移规则见 index-safety.md。
+下一次实现 P3 的 HTML 文件解析。URL 抓取需独立规划安全边界，不随 HTML 解析自动启用。Preset 格式与覆盖顺序见 presets.md，索引迁移规则见 index-safety.md。

@@ -5,6 +5,7 @@ description = "Observable, provider-agnostic RAG framework"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "pypdf>=6.18.1,<7.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.8.0",
