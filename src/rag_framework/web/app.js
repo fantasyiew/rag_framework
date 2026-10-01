@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 import {initConfiguration} from './config.js';
+import {citationStatus} from './citations.js';
 const history = [];
 // Initialization runs after the existing page setup completes.
 queueMicrotask(() => initConfiguration({el, $, api, post, table, showPage, notice}));
@@ -126,6 +127,21 @@ function message(role, text) {
   if ($('messages').querySelector('.empty')) $('messages').replaceChildren();
   const node = el('div', undefined, `message ${role}`); node.append(el('small', role === 'user' ? 'YOU' : 'ASSISTANT'), el('div', text)); $('messages').append(node); node.scrollIntoView({block:'nearest'}); return node;
 }
+const citationToggle = el('input'); citationToggle.type = 'checkbox'; citationToggle.id = 'show-citations';
+citationToggle.checked = localStorage.getItem('showCitations') !== 'false'; citationToggle.style.width = 'auto';
+const citationLabel = el('label', ' 显示引用证据'); citationLabel.htmlFor = citationToggle.id;
+citationLabel.prepend(citationToggle); $('chat-mode').parentElement.before(citationLabel);
+citationToggle.onchange = () => {
+  localStorage.setItem('showCitations', String(citationToggle.checked));
+  document.querySelectorAll('[data-answer-citations]').forEach(node => { node.hidden = !citationToggle.checked; });
+};
+function renderCitations(response) {
+  const state = citationStatus(response);
+  const panel = state.citations ? details(state.title, state.citations) : el('div', undefined, 'muted');
+  if (!state.citations) panel.append(el('p', state.title), el('p', state.message));
+  panel.dataset.answerCitations = ''; panel.hidden = !citationToggle.checked;
+  return panel;
+}
 $('chat-form').onsubmit = async event => {
   event.preventDefault(); if (busy) return;
   const query = $('query').value.trim(); if (!query) return;
@@ -137,7 +153,7 @@ $('chat-form').onsubmit = async event => {
     renderTrace(trace);
     const answer = mode === 'chat' ? response.answer.text : `召回 ${trace.candidates.length} 个候选，保留 ${trace.final_context.length} 个上下文。`;
     const node = message('assistant', answer);
-    if (mode === 'chat') { node.append(details('引用证据', response.answer.citations)); history.push(`User: ${query}`, `Assistant: ${answer}`); }
+    if (mode === 'chat') { node.append(renderCitations(response)); history.push(`User: ${query}`, `Assistant: ${answer}`); }
     $('query').value = ''; notice('执行完成，可在右侧检查完整检索过程。');
   } catch (error) { message('assistant', `执行失败：${error.message}`); notice(error.message, true); }
   finally { busy = false; $('send').disabled = false; $('clear').disabled = false; }
