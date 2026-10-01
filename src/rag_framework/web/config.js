@@ -76,15 +76,31 @@ async function loadConfig() {
     control.dataset.nullable = String(Boolean(nullable)); control.id = `config-${name}`;
     if (!choices && ['number', 'integer'].includes(variant.type)) {
       control.type = 'number'; control.step = variant.type === 'integer' ? '1' : 'any';
-      if (spec.minimum !== undefined) control.min = spec.minimum;
-      if (spec.maximum !== undefined) control.max = spec.maximum;
+      if (variant.minimum !== undefined) control.min = variant.minimum;
+      if (variant.maximum !== undefined) control.max = variant.maximum;
     }
     const value = preset.settings[name];
     control.value = value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
     control.oninput = refreshConfigDraft;
     const label = el('label', name); label.htmlFor = control.id;
+    if (name === 'default_top_k') label.textContent = 'top_k（检索硬上限）';
+    const hint = el('span', undefined, 'config-hint');
+    const icon = el('button', '?', 'config-help-icon'); icon.type = 'button';
+    icon.setAttribute('aria-label', `${name} 参数详情`);
+    const tooltip = el('span', undefined, 'config-tooltip');
+    tooltip.id = `config-help-${name}`; tooltip.setAttribute('role', 'tooltip');
+    const range = [variant.minimum !== undefined ? `最小值：${variant.minimum}` : '',
+      variant.exclusiveMinimum !== undefined ? `必须大于：${variant.exclusiveMinimum}` : '',
+      variant.maximum !== undefined ? `最大值：${variant.maximum}` : '',
+      choices ? `可选值：${choices.join('、')}` : ''].filter(Boolean).join('；');
+    const defaultText = JSON.stringify(spec.default);
+    tooltip.textContent = `${spec.description}\n${range}${nullable ? '\n支持留空（未设置）' : ''}\n默认值：${defaultText.length > 160 ? defaultText.slice(0, 160) + '…' : defaultText}\n${spec.env} · ${spec.activation === 'hot' ? '应用后热更新并持久化' : spec.requires_rebuild_review ? '需重启并检查索引兼容性' : '需重启服务'}`;
+    icon.setAttribute('aria-describedby', tooltip.id);
+    control.setAttribute('aria-describedby', tooltip.id);
+    hint.append(icon, tooltip);
+    const labelRow = el('div', undefined, 'config-label-row'); labelRow.append(label, hint);
     const help = el('p', `${spec.env} · ${nullable ? '留空为未设置 · ' : ''}${spec.activation === 'hot' ? '支持热更新' : spec.requires_rebuild_review ? '重启并检查索引兼容性' : '重启生效'}`, 'muted');
-    groups.get(spec.group).append(label, control, help); configControls.set(name, control);
+    groups.get(spec.group).append(labelRow, control, help); configControls.set(name, control);
     if (name === 'generation_user_prompt') groups.get(spec.group).append(el('p', '必须包含 {context}（编号证据）与 {question}；可选 {history}。字面花括号使用 {{ 和 }}。', 'muted'));
   }
   refreshConfigDraft();

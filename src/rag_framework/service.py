@@ -149,6 +149,7 @@ def build_service(settings: Settings) -> ServiceRuntime:
             planner_runtime.planner,
             runtime_keyword_store,
             reranker=reranker,
+            top_k_limit=settings.default_top_k,
             reranker_candidate_k=settings.reranker_candidate_k,
             reranker_fail_open=settings.reranker_mode == "auto",
             hybrid_candidate_multiplier=settings.hybrid_candidate_multiplier,

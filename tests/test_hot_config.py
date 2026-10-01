@@ -37,11 +37,13 @@ async def test_apply_persist_restart_new_kb_and_reject_unsafe_change(tmp_path, m
         result = await main.apply_configuration({'expected_version': 0, 'preset': preset})
         assert result['applied'] and result['version'] == 1
         assert service.knowledge_bases.runtime('default').retriever is not old
+        assert service.knowledge_bases.runtime('default').retriever.top_k_limit == 3
         assert (await old.planner.plan(Query(text='query'))).decision.top_k == 8
         assert (await main.planner_runtime.planner.plan(Query(text='query'))).decision.top_k == 3
         assert read_state(settings.managed_config_path)['settings']['default_top_k'] == 3
         assert load_managed_config(config(tmp_path)).default_top_k == 3
         new_id = service.knowledge_bases.create('new').id
+        assert service.knowledge_bases.runtime(new_id).retriever.top_k_limit == 3
         assert (await service.knowledge_bases.runtime(new_id).retriever.planner.plan(Query(text='query'))).decision.top_k == 3
         with pytest.raises(HTTPException) as conflict:
             await main.apply_configuration({'expected_version': 0, 'preset': preset})

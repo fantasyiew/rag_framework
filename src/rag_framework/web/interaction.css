@@ -5,3 +5,9 @@
 .dialog-head{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:#f7f9f5;border-bottom:1px solid var(--line);z-index:1}
 .dialog-head h2{margin:0}.dialog-body{padding:20px;overflow:auto}.dialog-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.dialog-section{margin-top:20px}.dialog-section h3{font-size:13px}.dialog-content{white-space:pre-wrap;line-height:1.75;padding:14px;background:#f5f7f2;border-radius:6px;max-height:280px;overflow:auto}.dialog-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}.dialog-grid div{overflow-wrap:anywhere}.dialog-message{color:#7b867f;font-size:12px}
 @media(max-width:700px){.dialog-grid{grid-template-columns:1fr}.chunk-dialog{max-height:92vh}}
+.config-label-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.config-label-row label { margin: 0; }
+.config-hint { position: relative; display: inline-flex; }
+.config-help-icon { width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: 12px; cursor: help; }
+.config-tooltip { display: none; position: absolute; z-index: 30; top: 25px; left: 0; width: min(360px, 65vw); padding: 12px; background: #172133; color: #fff; border-radius: 8px; box-shadow: 0 4px 16px #0004; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; max-height: 45vh; overflow-y: auto; }
+.config-hint:hover .config-tooltip, .config-hint:focus-within .config-tooltip { display: block; }

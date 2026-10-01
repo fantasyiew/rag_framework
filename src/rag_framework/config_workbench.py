@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
 
 from rag_framework.config import Settings
+from rag_framework.config_help import PARAMETER_DESCRIPTIONS
 from rag_framework.hot_config import HOT_FIELDS
 from rag_framework.presets import SECRET_FIELDS, validate_preset
 
@@ -27,6 +28,7 @@ def configuration_schema():
         fields[name] = {**specification, 'group': group, 'requires_rebuild_review': rebuild,
                        'activation': 'hot' if name in HOT_FIELDS else 'restart', 'env': 'RAG_' + name.upper()}
         fields[name]['default'] = to_jsonable_python(Settings.model_fields[name].get_default(call_default_factory=True))
+        fields[name]['description'] = specification.get('description') or PARAMETER_DESCRIPTIONS[name]
     for name, registry in (('chunker_mode', chunkers), ('fusion_mode', fusions),
                            ('embedding_mode', embedders), ('vector_backend', vector_stores)):
         fields[name]['enum'] = list(registry.factories) + (['auto'] if name == 'embedding_mode' else [])

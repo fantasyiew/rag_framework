@@ -40,6 +40,7 @@ class AdaptiveRetriever(Retriever):
         reranker_candidate_k: int = 32,
         reranker_fail_open: bool = True,
         fusion: Fusion | None = None,
+        top_k_limit: int | None = None,
     ) -> None:
         if hybrid_candidate_multiplier < 1:
             raise ValueError("hybrid_candidate_multiplier must be at least 1")
@@ -53,6 +54,9 @@ class AdaptiveRetriever(Retriever):
         self.hybrid_candidate_multiplier = hybrid_candidate_multiplier
         self.rrf_rank_constant = rrf_rank_constant
         self.fusion = fusion if fusion is not None else RRFFusion(rrf_rank_constant)
+        if top_k_limit is not None and not 0 <= top_k_limit <= 100:
+            raise ValueError('top_k_limit must be between 0 and 100 or None')
+        self.top_k_limit = top_k_limit or None
         if reranker_candidate_k < 1:
             raise ValueError("reranker_candidate_k must be positive")
         self.reranker_candidate_k = reranker_candidate_k
@@ -62,6 +66,10 @@ class AdaptiveRetriever(Retriever):
         trace = RetrievalTrace(query=query)
         started = perf_counter()
         plan = await self.planner.plan(query)
+        planned_top_k = plan.top_k
+        if self.top_k_limit is not None:
+            plan = plan.model_copy(update={'decision': plan.decision.model_copy(
+                update={'top_k': min(planned_top_k, self.top_k_limit)})})
         trace.plan = plan
         trace.add_step(
             "analyze_query",
@@ -89,6 +97,9 @@ class AdaptiveRetriever(Retriever):
             "select_retrieval_strategy",
             0,
             decision=plan.decision.model_dump(),
+            planned_top_k=planned_top_k,
+            top_k_limit=self.top_k_limit,
+            effective_top_k=plan.top_k,
         )
         # Explicit caller filters are authoritative even when a custom planner proposes filters.
         from rag_framework.core.filters import document_filters

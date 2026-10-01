@@ -30,10 +30,10 @@ def build_query_planner(
     if config.query_planner_mode == "disabled":
         return QueryPlannerRuntime(
             planner=FixedQueryPlanner(config.default_retrieval_strategy,
-                                      config.default_top_k, config.default_retrieval_rerank),
+                                      config.default_top_k or 8, config.default_retrieval_rerank),
             configured_mode="disabled", active_mode="disabled", provider="built_in",
         )
-    heuristic = HeuristicQueryPlanner(default_top_k=config.default_top_k)
+    heuristic = HeuristicQueryPlanner(default_top_k=config.default_top_k or 8)
     if config.query_planner_mode == "heuristic":
         return QueryPlannerRuntime(
             planner=heuristic,
@@ -85,7 +85,7 @@ def build_query_planner(
 
 
 def _llm_runtime(config: Settings, llm: StructuredOutputLLM) -> QueryPlannerRuntime:
-    fallback = HeuristicQueryPlanner(default_top_k=config.default_top_k)
+    fallback = HeuristicQueryPlanner(default_top_k=config.default_top_k or 8)
     planner = LLMQueryPlanner(
         llm,
         fallback,

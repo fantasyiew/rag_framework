@@ -22,6 +22,7 @@ def prepare_update(service, config):
     def rebuild(runtime):
         retriever = ManagedRetriever(runtime.vector_store, service.embedder, planner.planner,
             runtime.keyword_store, reranker=service.reranker,
+            top_k_limit=config.default_top_k,
             reranker_candidate_k=config.reranker_candidate_k,
             reranker_fail_open=config.reranker_mode == 'auto',
             hybrid_candidate_multiplier=config.hybrid_candidate_multiplier,

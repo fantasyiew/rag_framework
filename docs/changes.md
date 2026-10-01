@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-10-02 · 检索上限与配置说明
+
+- default_top_k 正整数改为最终检索结果硬上限；null、空字符串或 0 由规划器决定。
+- 保留重排候选扩张，限制最终上下文；固定与规则规划无上限时使用 8 的基线。
+- Trace 记录规划值、配置上限及有效 top_k；支持热更新及持久化。
+- 所有可配置参数增加中文详情、取值范围与默认值，前端问号支持 hover 和键盘聚焦。
+- 验证：209 passed、4 skipped；新增跨三种策略、重排开关及无上限场景回归验证。
+- 新增 docs/top-k-and-configuration-help.md。
+
 ## 2026-10-01 · 空召回与关键词索引恢复修复
 
 - knowledge_base_id、conversation_id、history、text 视为请求级保留字段，禁止进入文档 metadata filters；规划器提示与检索层双重防护。

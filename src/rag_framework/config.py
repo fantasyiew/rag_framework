@@ -46,7 +46,13 @@ class Settings(BaseSettings):
     vector_backend: str = "chroma"
     qdrant_directory: Path = Path("data/qdrant")
     qdrant_collection: str = "documents"
-    default_top_k: int = Field(default=8, ge=1, le=100)
+    default_top_k: int | None = Field(default=8, ge=0, le=100,
+        description="最终检索结果硬上限；留空或 0 以规划器为准。候选召回数可超过此值，生成另受 generation_max_context_chunks 限制。")
+
+    @field_validator('default_top_k', mode='before')
+    @classmethod
+    def normalize_top_k(cls, value):
+        return None if value == '' else value
     chunker_mode: str = Field(default="character", min_length=1)
     chunk_size: int = Field(default=800, gt=0)
     chunk_overlap: int = Field(default=120, ge=0)

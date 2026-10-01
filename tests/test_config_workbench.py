@@ -14,12 +14,19 @@ def test_draft_validation_is_isolated_and_field_errors(monkeypatch):
     monkeypatch.setenv('RAG_CHUNK_SIZE', 'invalid')
     monkeypatch.setenv('RAG_SERVICE_PRESET', 'nonexistent.json')
     assert validate_draft({'settings': {'chunk_size': 500, 'chunk_overlap': 20}})['valid']
-    result = validate_draft({'settings': {'default_top_k': 0}})
+    result = validate_draft({'settings': {'default_top_k': -1}})
     assert not result['valid']
     assert result['errors'][0]['field'] == 'default_top_k'
     assert not validate_draft({'settings': {'chunk_size': 10, 'chunk_overlap': 20}})['valid']
     assert not validate_draft({'settings': {'fusion_mode': 'unknown'}})['valid']
     assert not validate_draft({'settings': {'planner_api_key': 'do-not-echo'}})['valid']
+
+
+def test_parameter_details_and_unlimited_top_k():
+    assert all(field['description'] for field in configuration_schema()['fields'].values())
+    for value in (None, 0, '', 6):
+        assert validate_draft({'settings': {'default_top_k': value}})['valid']
+    assert not validate_draft({'settings': {'default_top_k': 101}})['valid']
 
 
 def test_builtin_defaults_are_complete_valid_and_environment_independent(monkeypatch):
