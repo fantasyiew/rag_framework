@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-10-01 · 空召回与关键词索引恢复修复
+
+- knowledge_base_id、conversation_id、history、text 视为请求级保留字段，禁止进入文档 metadata filters；规划器提示与检索层双重防护。
+- 自定义规划器/调用者传入保留过滤字段时，检索 Trace 记录 sanitize_filters；其他文档条件继续保留。
+- 兼容且 ready 的知识库从实际向量存储 chunk 快照恢复内存 BM25（含 ES 内存回退），修复重启后关键词索引为空。
+- 清空/失败/不兼容索引不从档案恢复，避免重新召回已清空内容；Chroma/Qdrant 支持 ChunkSnapshot 能力。
+
 ## 2026-10-01 · 引用展示开关
 
 - 聊天新增“显示引用证据”，浏览器记忆选择并即时切换历史回答的引用区域。

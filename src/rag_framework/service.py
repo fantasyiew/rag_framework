@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rag_framework.config import Settings
-from rag_framework.contracts.lifecycle import AsyncClosable
+from rag_framework.contracts.lifecycle import AsyncClosable, ChunkSnapshot
 from rag_framework.evaluation import (
     EvaluationDatasetStore,
     EvaluationStore,
@@ -131,6 +131,15 @@ def build_service(settings: Settings) -> ServiceRuntime:
                         "implementation": type(runtime_keyword_store).__name__, "index": index_name,
                         "endpoint_digest": hashlib.sha256(settings.elasticsearch_url.encode()).hexdigest()},
         }, runtime_vector_store, runtime_keyword_store)
+        from rag_framework.providers.bm25 import InMemoryBM25KeywordStore
+        memory_index = getattr(runtime_keyword_store, 'fallback', runtime_keyword_store)
+        manifest = state.manifest()
+        if (isinstance(memory_index, InMemoryBM25KeywordStore)
+                and isinstance(runtime_vector_store, ChunkSnapshot)
+                and manifest and manifest.get('state') == 'ready'
+                and manifest.get('fingerprint') == state.fingerprint):
+            # Restore only actual indexed chunks, never cleared or failed recovery archives.
+            memory_index.restore_chunks(runtime_vector_store.snapshot_chunks())
         runtime_indexing = ManagedIndexingPipeline(
             chunker, embedder, runtime_vector_store, runtime_keyword_store, state=state
         )

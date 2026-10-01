@@ -77,6 +77,18 @@ class QdrantVectorStore(VectorStore):
     async def count(self):
         return await self._run(self._count)
 
+    def snapshot_chunks(self):
+        with self.lock:
+            if not self.client.collection_exists(self.collection):
+                return []
+            chunks, offset = [], None
+            while True:
+                points, offset = self.client.scroll(self.collection, limit=256,
+                    offset=offset, with_payload=True, with_vectors=False)
+                chunks.extend(Chunk.model_validate(point.payload['chunk']) for point in points)
+                if offset is None:
+                    return chunks
+
     async def clear(self):
         def clear_collection():
             count = self._count()

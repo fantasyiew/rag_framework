@@ -61,6 +61,12 @@ class ChromaVectorStore(VectorStore):
     async def count(self) -> int:
         return await asyncio.to_thread(self._collection.count)
 
+    def snapshot_chunks(self) -> list[Chunk]:
+        result = self._collection.get(include=['documents', 'metadatas'])
+        packed = {key: [result[key]] for key in ('ids', 'documents', 'metadatas')}
+        packed['distances'] = [[0.0] * len(result['ids'])]
+        return [item.chunk for item in self._to_results(packed)]
+
     async def health(self) -> bool:
         try:
             await self.count()

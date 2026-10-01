@@ -11,6 +11,11 @@ class StrictIndexWriter(Protocol):
 
 
 @runtime_checkable
+class ChunkSnapshot(Protocol):
+    def snapshot_chunks(self) -> list[Chunk]: ...
+
+
+@runtime_checkable
 class RecoverableIndex(Protocol):
     async def check_index(self) -> None: ...
     def canonical_documents(self) -> list[Document]: ...

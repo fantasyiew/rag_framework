@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from rag_framework.contracts.providers import QueryPlanner, StructuredOutputLLM
+from rag_framework.core.filters import document_filters
 from rag_framework.core.models import (
     Query,
     QueryAnalysis,
@@ -166,7 +167,9 @@ analysis: query_type (exact_match|fact_lookup|semantic_question|filtered_search|
 multi_hop|conversation_followup|ambiguous), normalized_query, rewrite_required,
 rewritten_queries (0-4 standalone queries), keywords, filters, reason, confidence (0-1);
 decision: strategy (vector|keyword|hybrid), top_k (1-100), rerank, reason, confidence (0-1).
-Preserve user meaning and explicit filters. Rewrites supplement rather than replace the original.
+Preserve user meaning and explicit document metadata filters. Rewrites supplement rather than replace the original.
+knowledge_base_id, conversation_id, history and text are request routing fields, never metadata filters.
+Do not invent metadata keys or use the selected knowledge base as a filter.
 Prefer hybrid when uncertain. Do not answer the query."""
 
     def __init__(
@@ -223,7 +226,7 @@ Prefer hybrid when uncertain. Do not answer the query."""
                 else " ".join(plan.analysis.normalized_query.split()),
                 "rewrite_required": bool(rewrites),
                 "rewritten_queries": rewrites,
-                "filters": {**plan.analysis.filters, **query.filters},
+                "filters": document_filters({**plan.analysis.filters, **query.filters}),
             }
         )
         return plan.model_copy(update={"analysis": analysis, "planner": "llm"})

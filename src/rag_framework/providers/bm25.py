@@ -39,6 +39,9 @@ class InMemoryBM25KeywordStore(KeywordStore):
         self._lock = RLock()
 
     async def upsert(self, chunks: list[Chunk]) -> None:
+        self.restore_chunks(chunks)
+
+    def restore_chunks(self, chunks: list[Chunk]) -> None:
         with self._lock:
             for chunk in chunks:
                 self._chunks[chunk.id] = chunk

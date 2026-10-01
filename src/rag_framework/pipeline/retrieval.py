@@ -91,7 +91,12 @@ class AdaptiveRetriever(Retriever):
             decision=plan.decision.model_dump(),
         )
         # Explicit caller filters are authoritative even when a custom planner proposes filters.
-        filters = {**plan.filters, **query.filters}
+        from rag_framework.core.filters import document_filters
+        proposed_filters = {**plan.filters, **query.filters}
+        filters = document_filters(proposed_filters)
+        if filters != proposed_filters:
+            trace.add_step('sanitize_filters', 0,
+                removed_fields=sorted(set(proposed_filters) - set(filters)), effective_filters=filters)
         candidates: dict[str, RetrievedChunk] = {}
         for retrieval_query in trace.retrieval_queries:
             results = await self._execute_strategy(
