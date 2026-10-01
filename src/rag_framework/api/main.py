@@ -28,6 +28,13 @@ from rag_framework.evaluation import (
     RetrievalEvaluationReport,
     RetrievalEvaluationRequest,
 )
+from rag_framework.hot_config import (
+    HOT_FIELDS,
+    ConfigurationGateMiddleware,
+    RequestGate,
+    read_state,
+    write_state,
+)
 from rag_framework.index_state import IndexCompatibilityError
 from rag_framework.knowledge_bases import knowledge_base_router
 from rag_framework.presets import Preset, config_snapshot, export_preset, validate_preset
@@ -76,6 +83,58 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+config_gate = RequestGate()
+app.add_middleware(ConfigurationGateMiddleware, gate=config_gate)
+
+
+@app.get('/v1/config/status')
+async def configuration_status():
+    state = read_state(settings.managed_config_path)
+    return {'version': state['version'], 'config_hash': config_snapshot(settings)['config_hash'],
+            'persisted': settings.managed_config_path.exists(), 'hot_fields': sorted(HOT_FIELDS)}
+
+
+@app.post('/v1/config/apply')
+async def apply_configuration(payload: dict):
+    from rag_framework.config_workbench import validate_draft
+    from rag_framework.hot_runtime import prepare_update
+    global default_runtime, planner_runtime, generator_runtime, judge_runtime, retrieval_evaluator, rag_evaluator
+    async with config_gate.update():
+        state = read_state(settings.managed_config_path)
+        if payload.get('expected_version') != state['version']:
+            raise HTTPException(409, '配置已更新，请重新读取后再应用')
+        candidate = payload.get('preset')
+        validation = validate_draft(candidate)
+        if not validation['valid']:
+            return {**validation, 'applied': False}
+        preset = validate_preset(candidate, type(settings).model_fields)
+        current = export_preset(settings)
+        if preset.secret_refs != current.secret_refs:
+            raise HTTPException(409, '密钥引用变更需要重启，不能热更新')
+        changed = {key: value for key, value in preset.settings.items()
+                   if current.settings.get(key) != value}
+        blocked = sorted(set(changed) - HOT_FIELDS)
+        if blocked:
+            raise HTTPException(409, '以下配置需要重启或重建：' + ', '.join(blocked))
+        if not changed:
+            return {'valid': True, 'applied': False, 'version': state['version'], 'message': '配置没有变化'}
+        values = settings.model_dump()
+        values.update(changed)
+        from rag_framework.hot_config import isolated_settings
+        config = isolated_settings(type(settings), values)
+        try:
+            commit = prepare_update(service, config)
+            updated = {'schema_version': 1, 'version': state['version'] + 1,
+                       'settings': {**state['settings'], **changed}}
+            write_state(settings.managed_config_path, updated)
+        except Exception:  # noqa: BLE001 - Keep old runtime and return no provider details.
+            raise HTTPException(422, '配置组件构建或持久化失败，当前配置未改变') from None
+        commit()
+        default_runtime = knowledge_bases.runtime('default')
+        planner_runtime, generator_runtime, judge_runtime = service.planner_runtime, service.generator_runtime, service.judge_runtime
+        retrieval_evaluator, rag_evaluator = service.retrieval_evaluator(), service.rag_evaluator()
+        return {'valid': True, 'applied': True, 'version': updated['version'],
+                'config_hash': config_snapshot(settings)['config_hash'], 'persisted': True}
 
 
 @app.exception_handler(IndexCompatibilityError)

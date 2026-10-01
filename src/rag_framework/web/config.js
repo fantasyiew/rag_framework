@@ -1,11 +1,14 @@
-// Phase 1: an in-memory draft; validation never changes the running service.
+// Draft validation is isolated; explicit application persists supported hot settings.
 export function initConfiguration({el, $, api, post, table, showPage, notice}) {
 const configNav = el('button', '⚙　配置工作台'); configNav.dataset.page = 'configuration';
 document.querySelector('nav').append(configNav);
 const configPage = el('section', undefined, 'page'); configPage.id = 'configuration'; configPage.hidden = true;
 configPage.innerHTML = '<div class="heading"><div><h1>配置工作台</h1><p>编辑草稿、校验参数并检查变更。当前阶段草稿仅保存在本页面，离开或刷新后丢失。</p></div></div><article class="panel pad"><p id="config-status"></p><button id="config-reset" type="button">重新读取生效配置</button><button id="config-validate" type="button">校验草稿</button><div id="config-errors" role="status"></div></article><div id="config-fields"></div><article class="panel pad"><h2>变更对比</h2><div id="config-diff"></div></article>';
 document.querySelector('main').append(configPage);
-let configSchema, configCurrent, configDraft;
+configPage.querySelector('.heading p').textContent = '编辑草稿并校验。可热更新参数可应用并持久化；刷新会丢弃尚未应用的草稿。';
+let configSchema, configCurrent, configDraft, configVersion = 0;
+const applyButton = el('button', '应用并持久化'); applyButton.type = 'button'; applyButton.disabled = true;
+$('config-validate').after(applyButton);
 const configControls = new Map();
 const defaultsButton = el('button', '恢复默认设置'); defaultsButton.type = 'button';
 defaultsButton.disabled = true;
@@ -42,7 +45,7 @@ function refreshConfigDraft() {
       control.removeAttribute('aria-invalid');
       if (JSON.stringify(value) !== JSON.stringify(configCurrent.settings[name])) rows.push([
         name, JSON.stringify(configCurrent.settings[name]), JSON.stringify(value),
-        configSchema.fields[name].requires_rebuild_review ? '重启；检查索引兼容性，可能需重建' : '重启生效']);
+        configSchema.fields[name].activation === 'hot' ? '可热更新' : configSchema.fields[name].requires_rebuild_review ? '重启；检查索引兼容性，可能需重建' : '重启生效']);
     } catch (error) {
       invalid = true; control.setAttribute('aria-invalid', 'true');
       $('config-errors').append(el('p', `${name}：${error.message}`, 'error'));
@@ -52,10 +55,11 @@ function refreshConfigDraft() {
   return !invalid;
 }
 async function loadConfig() {
-  const [schema, preset, snapshot] = await Promise.all([api('/v1/config/schema'), api('/v1/config/preset'), api('/v1/config/snapshot')]);
+  const [schema, preset, snapshot, status] = await Promise.all([api('/v1/config/schema'), api('/v1/config/preset'), api('/v1/config/snapshot'), api('/v1/config/status')]);
+  configVersion = status.version;
   configSchema = schema; configCurrent = preset; configDraft = structuredClone(preset);
   configControls.clear(); $('config-fields').replaceChildren();
-  $('config-status').textContent = `当前生效配置：${snapshot.config_hash}。草稿校验通过也不会自动生效。密钥通过环境变量配置。`;
+  $('config-status').textContent = `当前生效配置：${snapshot.config_hash} · 版本 ${configVersion}。点击“应用并持久化”使可热更新参数生效；其他参数需要重启。`;
   const groups = new Map();
   for (const [name, spec] of Object.entries(schema.fields)) {
     if (!groups.has(spec.group)) {
@@ -78,12 +82,32 @@ async function loadConfig() {
     control.value = value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
     control.oninput = refreshConfigDraft;
     const label = el('label', name); label.htmlFor = control.id;
-    const help = el('p', `${spec.env} · ${nullable ? '留空为未设置 · ' : ''}${spec.requires_rebuild_review ? '修改后检查索引兼容性' : '重启生效'}`, 'muted');
+    const help = el('p', `${spec.env} · ${nullable ? '留空为未设置 · ' : ''}${spec.activation === 'hot' ? '支持热更新' : spec.requires_rebuild_review ? '重启并检查索引兼容性' : '重启生效'}`, 'muted');
     groups.get(spec.group).append(label, control, help); configControls.set(name, control);
   }
   refreshConfigDraft();
   defaultsButton.disabled = false;
+  applyButton.disabled = false;
 }
+applyButton.onclick = async () => {
+  if (!refreshConfigDraft()) return;
+  applyButton.disabled = true;
+  defaultsButton.disabled = true; $('config-reset').disabled = true; $('config-validate').disabled = true;
+  configControls.forEach(control => { control.disabled = true; });
+  try {
+    const result = await post('/v1/config/apply', {preset: configDraft, expected_version: configVersion});
+    if (!result.valid) {
+      $('config-errors').replaceChildren(...result.errors.map(error => el('p', `${error.field}：${error.message}`, 'error')));
+      return;
+    }
+    await loadConfig();
+    notice(result.applied ? `配置版本 ${result.version} 已生效并持久化，重启后保留。` : '配置没有变化。');
+  } catch (error) { notice(error.message, true); } finally {
+    applyButton.disabled = false; defaultsButton.disabled = false;
+    $('config-reset').disabled = false; $('config-validate').disabled = false;
+    configControls.forEach(control => { control.disabled = false; });
+  }
+};
 $('config-reset').onclick = () => loadConfig().catch(error => notice(error.message, true));
 $('config-validate').onclick = async () => {
   if (!refreshConfigDraft()) return;

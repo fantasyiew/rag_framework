@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
 
 from rag_framework.config import Settings
+from rag_framework.hot_config import HOT_FIELDS
 from rag_framework.presets import SECRET_FIELDS, validate_preset
 
 
@@ -16,7 +17,7 @@ def configuration_schema():
     schema = Settings.model_json_schema()
     fields = {}
     for name, specification in schema['properties'].items():
-        if name in SECRET_FIELDS or name == 'service_preset':
+        if name in SECRET_FIELDS or name in {'service_preset', 'managed_config_path'}:
             continue
         group = ('数据与索引' if name.startswith(('embedding_', 'chroma_', 'qdrant_', 'chunk', 'vector_', 'source_', 'knowledge_base_'))
                  else '融合与重排' if name.startswith(('fusion_', 'rrf_', 'reranker_'))
@@ -24,7 +25,7 @@ def configuration_schema():
                  else '检索与规划')
         rebuild = name.startswith(('embedding_', 'chunk', 'vector_', 'chroma_', 'qdrant_'))
         fields[name] = {**specification, 'group': group, 'requires_rebuild_review': rebuild,
-                       'activation': 'restart', 'env': 'RAG_' + name.upper()}
+                       'activation': 'hot' if name in HOT_FIELDS else 'restart', 'env': 'RAG_' + name.upper()}
         fields[name]['default'] = to_jsonable_python(Settings.model_fields[name].get_default(call_default_factory=True))
     for name, registry in (('chunker_mode', chunkers), ('fusion_mode', fusions),
                            ('embedding_mode', embedders), ('vector_backend', vector_stores)):

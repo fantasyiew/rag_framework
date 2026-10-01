@@ -90,7 +90,10 @@ class ManagedRetriever(AdaptiveRetriever):
         # Serialize against writes/rebuilds; no request sees a half-built index.
         async with self.state.lock:
             await self.state.validate()
-            return await super().retrieve(query)
+            trace = await super().retrieve(query)
+            if hasattr(self, 'config_identity'):
+                trace.add_step('configuration', 0, **self.config_identity)
+            return trace
 
     async def _vector_search_without_trace(self, query, top_k, filters):
         vector = validate_vectors([await self.embedder.embed_query(query)], 1,

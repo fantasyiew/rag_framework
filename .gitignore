@@ -8,6 +8,7 @@ __pycache__/
 .idea/
 data/chroma/
 data/qdrant/
+data/config/
 data/sources/
 data/evaluation/
 data/knowledge_bases/

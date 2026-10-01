@@ -57,6 +57,8 @@ class ServiceRuntime:
 
     def audit_snapshot(self):
         snapshot = config_snapshot(self.settings)
+        from rag_framework.hot_config import read_state
+        snapshot['config_version'] = read_state(self.settings.managed_config_path)['version']
         snapshot["components"] = {
             name: {"configured": info.configured, "active": info.active,
                    "implementation": info.implementation}
@@ -150,6 +152,11 @@ def build_service(settings: Settings) -> ServiceRuntime:
             generator_runtime.generator,
             max_context_chunks=settings.generation_max_context_chunks,
         )
+        from rag_framework.hot_config import read_state
+        runtime_retriever.config_identity = {
+            'version': read_state(settings.managed_config_path)['version'],
+            'config_hash': config_snapshot(settings)['config_hash'],
+        }
         runtime_sources = SourceService(
             source_directory, runtime_indexing
         )

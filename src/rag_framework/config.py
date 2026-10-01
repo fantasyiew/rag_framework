@@ -6,10 +6,13 @@ from typing import Literal
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from rag_framework.hot_config import load_managed_config
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="RAG_", extra="ignore")
     service_preset: Path | None = None
+    managed_config_path: Path = Path('data/config/runtime.json')
 
     @classmethod
     def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
@@ -125,4 +128,4 @@ class Settings(BaseSettings):
     elasticsearch_bm25_b: float = Field(default=0.75, ge=0, le=1)
 
 
-settings = Settings()
+settings = load_managed_config(Settings())
