@@ -98,6 +98,8 @@ class GenerationPipeline:
             context_count=len(contexts),
             citation_count=len(answer.citations),
             output_characters=len(answer.text),
+            prompt_hash=getattr(getattr(self.generator, 'primary', self.generator), 'prompt_hash', None),
+            context_chunk_ids=[item.chunk.id for item in contexts],
         )
 
     @staticmethod

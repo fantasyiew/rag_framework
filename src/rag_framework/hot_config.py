@@ -14,6 +14,7 @@ HOT_FIELDS = {
     'planner_minimum_confidence', 'planner_max_rewrites',
     'generation_temperature', 'generation_request_timeout', 'generation_max_retries',
     'generation_max_tokens', 'generation_max_context_chunks',
+    'generation_system_prompt', 'generation_user_prompt',
     'evaluation_concurrency', 'evaluation_metrics', 'evaluation_judge_temperature',
     'evaluation_judge_request_timeout', 'evaluation_judge_max_retries',
     'evaluation_judge_max_tokens', 'evaluation_judge_max_context_characters',

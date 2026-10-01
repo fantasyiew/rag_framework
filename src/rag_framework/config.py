@@ -3,10 +3,11 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from rag_framework.hot_config import load_managed_config
+from rag_framework.prompts import SYSTEM_PROMPT, USER_PROMPT, validate_user_prompt
 
 
 class Settings(BaseSettings):
@@ -90,6 +91,13 @@ class Settings(BaseSettings):
     planner_max_rewrites: int = Field(default=4, ge=0, le=10)
     answer_generator_mode: Literal["extractive", "llm", "auto"] = "auto"
     generation_model: str | None = None
+    generation_system_prompt: str = Field(default=SYSTEM_PROMPT, min_length=1, max_length=20000)
+    generation_user_prompt: str = Field(default=USER_PROMPT, min_length=1, max_length=20000)
+
+    @field_validator('generation_user_prompt')
+    @classmethod
+    def validate_generation_prompt(cls, value):
+        return validate_user_prompt(value)
     generation_api_key: SecretStr | None = None
     generation_base_url: str | None = None
     generation_temperature: float = Field(default=0.2, ge=0.0, le=2.0)

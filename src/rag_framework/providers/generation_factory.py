@@ -65,7 +65,8 @@ def build_answer_generator(config: Settings) -> AnswerGeneratorRuntime:
         }
         if base_url:
             options["base_url"] = base_url
-        generator = LangChainAnswerGenerator(ChatOpenAI(**options), model_name=model)
+        generator = LangChainAnswerGenerator(ChatOpenAI(**options), model_name=model,
+            system_prompt=config.generation_system_prompt, user_prompt=config.generation_user_prompt)
     except Exception as exc:
         reason = f"Answer provider initialization failed: {type(exc).__name__}."
         if config.answer_generator_mode == "llm":

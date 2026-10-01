@@ -68,7 +68,8 @@ async function loadConfig() {
     }
     const variant = spec.anyOf?.find(option => option.type !== 'null') || spec;
     const choices = variant.enum || spec.enum || (variant.type === 'boolean' ? ['true', 'false'] : null);
-    const control = el(choices ? 'select' : variant.type === 'object' || variant.type === 'array' ? 'textarea' : 'input');
+    const control = el(choices ? 'select' : variant.type === 'object' || variant.type === 'array' || name.endsWith('_prompt') ? 'textarea' : 'input');
+    if (name.endsWith('_prompt')) control.rows = 10;
     if (choices) choices.forEach(value => { const option = el('option', value); option.value = value; control.append(option); });
     const nullable = spec.anyOf?.some(option => option.type === 'null');
     if (nullable && choices) { const option = el('option', '未设置'); option.value = ''; control.prepend(option); }
@@ -84,6 +85,7 @@ async function loadConfig() {
     const label = el('label', name); label.htmlFor = control.id;
     const help = el('p', `${spec.env} · ${nullable ? '留空为未设置 · ' : ''}${spec.activation === 'hot' ? '支持热更新' : spec.requires_rebuild_review ? '重启并检查索引兼容性' : '重启生效'}`, 'muted');
     groups.get(spec.group).append(label, control, help); configControls.set(name, control);
+    if (name === 'generation_user_prompt') groups.get(spec.group).append(el('p', '必须包含 {context}（编号证据）与 {question}；可选 {history}。字面花括号使用 {{ 和 }}。', 'muted'));
   }
   refreshConfigDraft();
   defaultsButton.disabled = false;

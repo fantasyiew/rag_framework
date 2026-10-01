@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
@@ -12,17 +13,19 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from rag_framework.contracts.providers import AnswerGenerator
 from rag_framework.core.models import Query, RetrievedChunk
+from rag_framework.prompts import SYSTEM_PROMPT, USER_PROMPT, validate_user_prompt
 
 
 class LangChainAnswerGenerator(AnswerGenerator):
-    _SYSTEM_PROMPT = """You are a grounded RAG assistant. Answer only from the supplied context.
-Use inline citations like [1] after every factual claim. Citation numbers must refer to the
-numbered context blocks. If the context is insufficient, state that clearly. Never invent a
-source or citation. Reply in the user's language."""
+    _SYSTEM_PROMPT = SYSTEM_PROMPT
 
-    def __init__(self, chat_model: BaseChatModel, *, model_name: str) -> None:
+    def __init__(self, chat_model: BaseChatModel, *, model_name: str,
+                 system_prompt: str = SYSTEM_PROMPT, user_prompt: str = USER_PROMPT) -> None:
         self.chat_model = chat_model
         self._model_name = model_name
+        self.system_prompt = system_prompt
+        self.user_prompt = validate_user_prompt(user_prompt)
+        self.prompt_hash = hashlib.sha256((system_prompt + '\0' + user_prompt).encode()).hexdigest()
 
     @property
     def model_name(self) -> str:
@@ -40,9 +43,8 @@ source or citation. Reply in the user's language."""
             if text:
                 yield text
 
-    @classmethod
     def _messages(
-        cls, query: Query, contexts: list[RetrievedChunk]
+        self, query: Query, contexts: list[RetrievedChunk]
     ) -> list[SystemMessage | HumanMessage]:
         context_blocks = []
         for number, result in enumerate(contexts, 1):
@@ -54,8 +56,8 @@ source or citation. Reply in the user's language."""
             )
         context_text = "\n\n".join(context_blocks) or "(no relevant context retrieved)"
         history = "\n".join(query.history[-6:]) or "(none)"
-        prompt = f"Conversation history:\n{history}\n\nContext:\n{context_text}\n\nQuestion:\n{query.text}"
-        return [SystemMessage(content=cls._SYSTEM_PROMPT), HumanMessage(content=prompt)]
+        prompt = self.user_prompt.format(history=history, context=context_text, question=query.text)
+        return [SystemMessage(content=self.system_prompt), HumanMessage(content=prompt)]
 
 
 class ExtractiveAnswerGenerator(AnswerGenerator):
