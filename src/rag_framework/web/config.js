@@ -7,6 +7,19 @@ configPage.innerHTML = '<div class="heading"><div><h1>配置工作台</h1><p>编
 document.querySelector('main').append(configPage);
 let configSchema, configCurrent, configDraft;
 const configControls = new Map();
+const defaultsButton = el('button', '恢复默认设置'); defaultsButton.type = 'button';
+defaultsButton.disabled = true;
+$('config-reset').after(defaultsButton);
+defaultsButton.onclick = () => {
+  if (!configSchema) return;
+  configDraft.secret_refs = {};
+  for (const [name, control] of configControls) {
+    const value = structuredClone(configSchema.fields[name].default ?? null);
+    control.value = value === null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  }
+  refreshConfigDraft();
+  notice('草稿已恢复为项目内置默认配置，密钥引用已清空。当前生效配置保持不变，请检查差异并校验草稿。');
+};
 configNav.onclick = () => { showPage('configuration'); if (!configCurrent) loadConfig().catch(error => notice(error.message, true)); };
 function configValue(spec, control) {
   if (control.dataset.nullable === 'true' && control.value === '') return null;
@@ -69,6 +82,7 @@ async function loadConfig() {
     groups.get(spec.group).append(label, control, help); configControls.set(name, control);
   }
   refreshConfigDraft();
+  defaultsButton.disabled = false;
 }
 $('config-reset').onclick = () => loadConfig().catch(error => notice(error.message, true));
 $('config-validate').onclick = async () => {

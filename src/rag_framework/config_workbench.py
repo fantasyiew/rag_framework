@@ -3,6 +3,7 @@
 import math
 
 from pydantic import ValidationError
+from pydantic_core import to_jsonable_python
 
 from rag_framework.config import Settings
 from rag_framework.presets import SECRET_FIELDS, validate_preset
@@ -24,6 +25,7 @@ def configuration_schema():
         rebuild = name.startswith(('embedding_', 'chunk', 'vector_', 'chroma_', 'qdrant_'))
         fields[name] = {**specification, 'group': group, 'requires_rebuild_review': rebuild,
                        'activation': 'restart', 'env': 'RAG_' + name.upper()}
+        fields[name]['default'] = to_jsonable_python(Settings.model_fields[name].get_default(call_default_factory=True))
     for name, registry in (('chunker_mode', chunkers), ('fusion_mode', fusions),
                            ('embedding_mode', embedders), ('vector_backend', vector_stores)):
         fields[name]['enum'] = list(registry.factories) + (['auto'] if name == 'embedding_mode' else [])

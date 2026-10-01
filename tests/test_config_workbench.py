@@ -20,3 +20,17 @@ def test_draft_validation_is_isolated_and_field_errors(monkeypatch):
     assert not validate_draft({'settings': {'chunk_size': 10, 'chunk_overlap': 20}})['valid']
     assert not validate_draft({'settings': {'fusion_mode': 'unknown'}})['valid']
     assert not validate_draft({'settings': {'planner_api_key': 'do-not-echo'}})['valid']
+
+
+def test_builtin_defaults_are_complete_valid_and_environment_independent(monkeypatch):
+    monkeypatch.setenv('RAG_CHUNK_SIZE', '1234')
+    monkeypatch.setenv('RAG_PLANNER_API_KEY', 'private-key')
+    fields = configuration_schema()['fields']
+    assert all('default' in field for field in fields.values())
+    defaults = {name: field['default'] for name, field in fields.items()}
+    assert defaults['chunk_size'] == 800
+    assert defaults['embedding_mode'] == 'hash'
+    assert defaults['fusion_weights'] == {}
+    assert defaults['embedding_model'] is None
+    assert not set(defaults) & SECRET_FIELDS
+    assert validate_draft({'settings': defaults, 'secret_refs': {}})['valid']
