@@ -1,5 +1,8 @@
 # RAG Framework
 
+侧栏新增配置工作台，可编辑草稿、校验参数和比较当前配置；第一阶段暂存于页面内存。
+见 [配置工作台](docs/config-workbench.md)。
+
 混合检索新增 `RAG_FUSION_MODE=weighted_sum`，使用明确的 min-max 归一化；
 默认 RRF 不变，详见 [融合配置与分数说明](docs/fusion.md)。
 

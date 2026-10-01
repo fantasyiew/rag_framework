@@ -1,5 +1,8 @@
 const $ = (id) => document.getElementById(id);
+import {initConfiguration} from './config.js';
 const history = [];
+// Initialization runs after the existing page setup completes.
+queueMicrotask(() => initConfiguration({el, $, api, post, table, showPage, notice}));
 let busy = false;
 let reportRequest = 0;
 let knowledgeBaseId = localStorage.getItem('knowledgeBaseId') || 'default';

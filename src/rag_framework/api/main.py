@@ -88,6 +88,18 @@ async def get_config_snapshot():
     return service.audit_snapshot()
 
 
+@app.get('/v1/config/schema')
+async def get_config_schema():
+    from rag_framework.config_workbench import configuration_schema
+    return configuration_schema()
+
+
+@app.post('/v1/config/draft/validate')
+async def check_config_draft(payload: dict):
+    from rag_framework.config_workbench import validate_draft
+    return validate_draft(payload)
+
+
 @app.get("/v1/config/preset", response_model=Preset)
 async def get_config_preset():
     try:
