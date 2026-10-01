@@ -8,6 +8,6 @@
 .config-label-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .config-label-row label { margin: 0; }
 .config-hint { position: relative; display: inline-flex; }
-.config-help-icon { width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: 12px; cursor: help; }
-.config-tooltip { display: none; position: absolute; z-index: 30; top: 25px; left: 0; width: min(360px, 65vw); padding: 12px; background: #172133; color: #fff; border-radius: 8px; box-shadow: 0 4px 16px #0004; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; max-height: 45vh; overflow-y: auto; }
-.config-hint:hover .config-tooltip, .config-hint:focus-within .config-tooltip { display: block; }
+.config-help-icon:hover, .config-help-icon:focus-visible { color: #245c42; border-color: #245c42; background: #edf4ee; }
+.config-tooltip { display: block; position: absolute; z-index: 30; top: 23px; left: -8px; width: min(360px, 65vw); padding: 12px 14px; background: #fff; color: #33483a; border: 1px solid #dce5dc; border-radius: 8px; box-shadow: 0 6px 22px #1d302622; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; max-height: 45vh; overflow-y: auto; }
+.config-tooltip[hidden] { display: none !important; }

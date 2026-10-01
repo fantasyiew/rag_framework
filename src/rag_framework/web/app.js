@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-import {initConfiguration} from './config.js';
+import {initConfiguration} from './config.js?v=20261002-help2';
 import {citationStatus} from './citations.js';
 const history = [];
 // Initialization runs after the existing page setup completes.

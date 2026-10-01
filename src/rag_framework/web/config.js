@@ -86,8 +86,10 @@ async function loadConfig() {
     if (name === 'default_top_k') label.textContent = 'top_k（检索硬上限）';
     const hint = el('span', undefined, 'config-hint');
     const icon = el('button', '?', 'config-help-icon'); icon.type = 'button';
+    icon.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;min-width:16px;min-height:16px;padding:0;margin:0;border:1px solid #9baa9e;border-radius:50%;font:600 10px/1 sans-serif;background:transparent;color:#718175;box-sizing:border-box;flex:none;cursor:help';
     icon.setAttribute('aria-label', `${name} 参数详情`);
     const tooltip = el('span', undefined, 'config-tooltip');
+    tooltip.hidden = true;
     tooltip.id = `config-help-${name}`; tooltip.setAttribute('role', 'tooltip');
     const range = [variant.minimum !== undefined ? `最小值：${variant.minimum}` : '',
       variant.exclusiveMinimum !== undefined ? `必须大于：${variant.exclusiveMinimum}` : '',
@@ -97,6 +99,12 @@ async function loadConfig() {
     tooltip.textContent = `${spec.description}\n${range}${nullable ? '\n支持留空（未设置）' : ''}\n默认值：${defaultText.length > 160 ? defaultText.slice(0, 160) + '…' : defaultText}\n${spec.env} · ${spec.activation === 'hot' ? '应用后热更新并持久化' : spec.requires_rebuild_review ? '需重启并检查索引兼容性' : '需重启服务'}`;
     icon.setAttribute('aria-describedby', tooltip.id);
     control.setAttribute('aria-describedby', tooltip.id);
+    const closeHint = () => { tooltip.hidden = true; };
+    hint.onmouseenter = () => { tooltip.hidden = false; };
+    hint.onmouseleave = closeHint;
+    icon.onfocus = () => { tooltip.hidden = false; };
+    icon.onblur = closeHint;
+    icon.onkeydown = event => { if (event.key === 'Escape') closeHint(); };
     hint.append(icon, tooltip);
     const labelRow = el('div', undefined, 'config-label-row'); labelRow.append(label, hint);
     const help = el('p', `${spec.env} · ${nullable ? '留空为未设置 · ' : ''}${spec.activation === 'hot' ? '支持热更新' : spec.requires_rebuild_review ? '重启并检查索引兼容性' : '重启生效'}`, 'muted');
