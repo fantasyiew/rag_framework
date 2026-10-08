@@ -1,5 +1,10 @@
 # 变更记录
 
+## 2026-10-08 · JSONL 样例目录改名
+
+- 根目录 test_datasets 重命名为 datasets_example，两个 JSONL 样例完整保留。
+- 更新目录说明；应用存储 data/evaluation/datasets 及测试临时目录不变。
+
 ## 2026-10-07 · 知识库 Chunk 导出
 
 - 新增 ZIP 快照下载接口与管理页入口，包含 chunks.jsonl 和 manifest.json，不含向量。
