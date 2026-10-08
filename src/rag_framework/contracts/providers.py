@@ -44,6 +44,11 @@ class Embedder(ABC):
 
 
 class VectorStore(ABC):
+    async def iter_chunks(self, *, page_size: int = 256) -> AsyncIterator[Chunk]:
+        """Optional paged export capability; callers must coordinate index writes."""
+        raise NotImplementedError('Vector backend does not support chunk export')
+        yield  # pragma: no cover - Makes this an async iterator.
+
     @abstractmethod
     async def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None: ...
 

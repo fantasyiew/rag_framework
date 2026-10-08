@@ -12,5 +12,6 @@ data/config/
 data/sources/
 data/evaluation/
 data/knowledge_bases/
+data/traces/
 frontend/node_modules/
 frontend/dist/

@@ -166,6 +166,7 @@ class RerankComparison(BaseModel):
 
 
 class TraceStep(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     duration_ms: float = Field(ge=0)
     details: dict[str, Any] = Field(default_factory=dict)
@@ -181,6 +182,9 @@ class RetrievalTrace(BaseModel):
     final_context: list[RetrievedChunk] = Field(default_factory=list)
     steps: list[TraceStep] = Field(default_factory=list)
     started_at: float = Field(default_factory=time)
+    finished_at: float | None = None
+    status: Literal["running", "completed", "failed"] = "running"
+    error: str | None = None
 
     def add_step(self, name: str, duration_ms: float, **details: Any) -> None:
         self.steps.append(TraceStep(name=name, duration_ms=duration_ms, details=details))

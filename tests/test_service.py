@@ -19,7 +19,7 @@ async def test_runtime_isolates_knowledge_bases_and_closes_once(tmp_path, backen
         chroma_directory=tmp_path / 'chroma', source_directory=tmp_path / 'sources',
         knowledge_base_directory=tmp_path / 'bases',
         evaluation_report_directory=tmp_path / 'reports',
-        evaluation_dataset_directory=tmp_path / 'datasets',
+        evaluation_dataset_directory=tmp_path / 'test_datasets',
     )
     service = build_service(config)
     default = service.knowledge_bases.runtime('default')

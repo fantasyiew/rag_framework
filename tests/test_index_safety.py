@@ -23,7 +23,7 @@ def config(tmp_path, **options):
         "chroma_directory": tmp_path / "chroma", "source_directory": tmp_path / "sources",
         "knowledge_base_directory": tmp_path / "bases",
         "evaluation_report_directory": tmp_path / "reports",
-        "evaluation_dataset_directory": tmp_path / "datasets",
+        "evaluation_dataset_directory": tmp_path / "test_datasets",
     }
     return Settings(_env_file=None, **(values | options))
 
@@ -40,6 +40,14 @@ async def test_changed_fingerprint_blocks_query_and_write_until_rebuild(tmp_path
     await first.close()
     second = build_service(config(tmp_path, **changed))
     base = second.knowledge_bases.runtime("default")
+    if 'chunk_size' not in changed:
+        # Global embedding defaults do not replace per-KB binding.
+        assert (await base.index_state.describe())['status'] == 'ready'
+        assert base.index_state.fingerprint['embedding']['dimensions'] == 16
+        assert base.index_state.fingerprint['embedding']['revision'] is None
+        assert len((await base.retriever.retrieve(Query(text='alpha'))).final_context) == 1
+        await second.close()
+        return
     assert (await base.index_state.describe())["status"] == "blocked"
     with pytest.raises(IndexCompatibilityError):
         await base.retriever.retrieve(Query(text="alpha"))
@@ -167,8 +175,14 @@ async def test_auto_never_reuses_existing_remote_vectors_with_another_model(tmp_
     await first.knowledge_bases.runtime("default").indexing_pipeline.index([Document(content="text")])
     await first.close()
     second = build_service(initial.model_copy(update=changed))
-    with pytest.raises(IndexCompatibilityError):
-        await second.knowledge_bases.runtime("default").retriever.retrieve(Query(text="text"))
+    runtime = second.knowledge_bases.runtime('default')
+    if changed.get('embedding_model'):
+        assert runtime.embedder.config.embedding_model == 'model-a'
+        runtime.embedder.embed_query = AsyncMock(return_value=[0.0] * 16)
+        assert len((await runtime.retriever.retrieve(Query(text='text'))).final_context) == 1
+    else:
+        with pytest.raises(IndexCompatibilityError):
+            await runtime.retriever.retrieve(Query(text='text'))
     await second.close()
 
 

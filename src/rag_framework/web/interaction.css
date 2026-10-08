@@ -11,3 +11,27 @@
 .config-help-icon:hover, .config-help-icon:focus-visible { color: #245c42; border-color: #245c42; background: #edf4ee; }
 .config-tooltip { display: block; position: absolute; z-index: 30; top: 23px; left: -8px; width: min(360px, 65vw); padding: 12px 14px; background: #fff; color: #33483a; border: 1px solid #dce5dc; border-radius: 8px; box-shadow: 0 6px 22px #1d302622; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; max-height: 45vh; overflow-y: auto; }
 .config-tooltip[hidden] { display: none !important; }
+.trace-record { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; }
+.trace-record > summary { font-size: 12px; overflow-wrap: anywhere; }
+.trace-record-body { padding-top: 12px; }
+.trace-id { font-family: ui-monospace, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.trace-id button, .trace-message-link { padding: 3px 7px; margin-left: 8px; font-size: 10px; }
+.trace-lookup { display: flex; gap: 8px; margin: 12px 0; }
+.trace-lookup input { flex: 1; }
+.step a { color: var(--green); font-size: 12px; }
+.config-section { --section-accent: #698a72; border: 1px solid #dde5dd; border-left: 3px solid var(--section-accent); border-radius: 9px; margin: 20px 0; padding: 14px 18px 18px; min-width: 0; background: #fcfdfb; }
+.config-section[data-tone="blue"] { --section-accent: #6d92ab; }
+.config-section[data-tone="purple"] { --section-accent: #9785ad; }
+.config-section[data-tone="orange"] { --section-accent: #b4976c; }
+.config-section legend { padding: 0 8px; color: #354b3d; font-size: 14px; font-weight: 600; }
+.config-mode-badge { display: inline-block; margin-left: 12px; padding: 2px 8px; border-radius: 5px; background: #edf2ed; color: #64766a; font-size: 10px; font-weight: 400; }
+.config-section-description { margin: 2px 0 12px; color: #718075; font-size: 12px; line-height: 1.8; }
+.config-section-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 20px; }
+.config-field { min-width: 0; }
+.config-field-wide { grid-column: 1 / -1; }
+.config-field > .muted { font-size: 10px; line-height: 1.6; }
+@media(max-width:900px) { .config-section-fields { grid-template-columns: 1fr; } .config-mode-badge { margin-left: 6px; } }
+.confirmation-dialog { max-width: 520px; width: min(90vw, 520px); padding: 28px; border: 1px solid #ccd8ce; border-radius: 16px; color: #26372b; background: #fff; box-shadow: 0 24px 70px #182c2340; }
+.confirmation-dialog::backdrop { background: #15261e70; }
+.confirmation-dialog p { line-height: 1.7; }
+.confirmation-dialog input { width: 100%; box-sizing: border-box; margin: 8px 0 20px; }

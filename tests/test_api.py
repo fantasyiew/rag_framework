@@ -113,4 +113,33 @@ def test_openapi_exposes_retrieval_and_rag_evaluation_workflows() -> None:
     assert "/v1/evaluations/retrieval" in paths
     assert "/v1/evaluations/rag" in paths
     assert "/v1/evaluations/rag/datasets/{dataset_id}" in paths
+    assert "/v1/evaluations/retrieval/datasets/{dataset_id}" in paths
+    assert "/v1/evaluation-datasets" in paths
     assert "/v1/evaluation-datasets/import" in paths
+    assert "/v1/evaluation-datasets/{dataset_id}" in paths
+    assert "/v1/evaluation-datasets/{dataset_id}/export" in paths
+
+
+@pytest.mark.asyncio
+async def test_dataset_routes_over_http(monkeypatch, tmp_path):
+    import httpx
+    monkeypatch.setattr(main, 'evaluation_dataset_store', EvaluationDatasetStore(tmp_path))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url='http://test') as client:
+        empty = await client.get('/v1/evaluation-datasets')
+        assert empty.status_code == 200 and empty.json() == []
+        imported = await client.post('/v1/evaluation-datasets/import?name=route-test',
+            content='{"query":"Tokyo","relevant_chunk_ids":["chunk-1"]}',
+            headers={'Content-Type': 'application/x-ndjson'})
+        assert imported.status_code == 200
+        dataset_id = imported.json()['id']
+        listing = await client.get('/v1/evaluation-datasets')
+        assert listing.status_code == 200 and listing.json()[0]['id'] == dataset_id
+        assert (await client.get(f'/v1/evaluation-datasets/{dataset_id}')).status_code == 200
+        assert (await client.get(f'/v1/evaluation-datasets/{dataset_id}/export')).status_code == 200
+
+
+def test_frontend_dataset_list_uses_registered_route():
+    from pathlib import Path
+    source = (Path(__file__).parents[1] / 'src/rag_framework/web/app.js').read_text(encoding='utf-8')
+    assert "api('/v1/evaluation-datasets')" in source
+    assert '/v1/evaluation-test_datasets' not in source

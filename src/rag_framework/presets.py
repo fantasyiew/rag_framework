@@ -23,17 +23,35 @@ class Preset(BaseModel):
     secret_refs: dict[str, str] = Field(default_factory=dict)
 
 
+class PresetFieldError(ValueError):
+    """Safe field-level failures: never include submitted values."""
+    def __init__(self, errors):
+        self.errors = errors
+        super().__init__('Invalid preset fields')
+
+
 def validate_preset(data, fields):
     preset = Preset.model_validate(data)
-    if set(preset.settings) - (set(fields) - SECRET_FIELDS - {"service_preset"}):
-        raise ValueError("Preset contains unknown, secret or recursive settings")
-    if set(preset.secret_refs) - SECRET_FIELDS:
-        raise ValueError("Preset secret_refs must target credential fields")
-    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in preset.secret_refs.values()):
-        raise ValueError("Secret references must be environment variable names")
+    errors = []
+    for name in sorted(set(preset.settings) - (set(fields) - SECRET_FIELDS - {'service_preset'})):
+        message = ('凭据不能直接写入 settings，请使用 secret_refs 环境变量引用' if name in SECRET_FIELDS
+                   else '不允许在预设中引用另一预设' if name == 'service_preset' else '未知配置字段')
+        errors.append({'field': name, 'message': message})
+    for field, reference in preset.secret_refs.items():
+        if field not in SECRET_FIELDS:
+            errors.append({'field': 'secret_refs.' + field, 'message': '此字段不是可引用的凭据字段'})
+        elif not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', reference):
+            errors.append({'field': field, 'message': '密钥引用必须是环境变量名：以字母或下划线开头，仅含字母、数字和下划线；不要填写密钥明文'})
     for name, value in preset.settings.items():
-        if name.endswith(("_url", "_base_url")) and value and safe_url(value) != value:
-            raise ValueError("Preset URLs must not contain credentials, query or fragment")
+        if name.endswith(('_url', '_base_url')) and value:
+            try:
+                valid = isinstance(value, str) and safe_url(value) == value
+            except (ValueError, TypeError, AttributeError):
+                valid = False
+            if not valid:
+                errors.append({'field': name, 'message': 'URL 必须为字符串，且不能包含认证信息、查询参数或片段'})
+    if errors:
+        raise PresetFieldError(errors)
     return preset
 
 

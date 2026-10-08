@@ -15,7 +15,7 @@ def config(tmp_path):
         answer_generator_mode='extractive', evaluation_judge_mode='heuristic',
         managed_config_path=tmp_path / 'config.json', chroma_directory=tmp_path / 'chroma',
         source_directory=tmp_path / 'sources', knowledge_base_directory=tmp_path / 'bases',
-        evaluation_report_directory=tmp_path / 'reports', evaluation_dataset_directory=tmp_path / 'datasets')
+        evaluation_report_directory=tmp_path / 'reports', evaluation_dataset_directory=tmp_path / 'test_datasets')
 
 
 async def test_apply_persist_restart_new_kb_and_reject_unsafe_change(tmp_path, monkeypatch):

@@ -20,14 +20,15 @@ def prepare_update(service, config):
     fingerprint = config_snapshot(config)['config_hash']
 
     def rebuild(runtime):
-        retriever = ManagedRetriever(runtime.vector_store, service.embedder, planner.planner,
+        retriever = ManagedRetriever(runtime.vector_store, runtime.embedder or service.embedder, planner.planner,
             runtime.keyword_store, reranker=service.reranker,
             top_k_limit=config.default_top_k,
             reranker_candidate_k=config.reranker_candidate_k,
             reranker_fail_open=config.reranker_mode == 'auto',
             hybrid_candidate_multiplier=config.hybrid_candidate_multiplier,
             fusion=fusion, state=runtime.index_state)
-        retriever.config_identity = {'version': version, 'config_hash': fingerprint}
+        retriever.config_identity = {**getattr(runtime.retriever, 'config_identity', {}),
+                                    'version': version, 'config_hash': fingerprint}
         return replace(runtime, retriever=retriever, generation_pipeline=GenerationPipeline(
             retriever, generator.generator, max_context_chunks=config.generation_max_context_chunks))
 

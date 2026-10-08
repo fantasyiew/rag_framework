@@ -1,9 +1,14 @@
 const $ = (id) => document.getElementById(id);
-import {initConfiguration} from './config.js?v=20261002-help2';
+import {initConfiguration} from './config.js?v=20261006-credentials';
+import {newKnowledgeBasePayload} from './knowledge-create.js?v=20261005';
+import {askConfirmation} from './confirm.js?v=20261005';
 import {citationStatus} from './citations.js';
+import {initTraceHistory} from './traces.js?v=20261005';
 const history = [];
 // Initialization runs after the existing page setup completes.
-queueMicrotask(() => initConfiguration({el, $, api, post, table, showPage, notice}));
+let configurationWorkbench;
+queueMicrotask(() => { configurationWorkbench = initConfiguration({el, $, api, post, table, showPage, notice,
+  getKnowledgeBaseId: () => knowledgeBaseId, reloadKnowledgeBases: loadKnowledgeBases, askConfirmation}); });
 let busy = false;
 let reportRequest = 0;
 let knowledgeBaseId = localStorage.getItem('knowledgeBaseId') || 'default';
@@ -23,7 +28,11 @@ function notice(text, error = false) {
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `请求失败 (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(typeof data?.detail === 'string' ? data.detail : data?.detail?.message || `请求失败 (${response.status})`);
+    error.traceId = data?.detail?.trace_id;
+    throw error;
+  }
   return data;
 }
 const post = (path, data) => api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
@@ -109,7 +118,13 @@ function renderTrace(trace, target = $('trace')) {
   if (trace.plan) target.append(details('Query 分析与检索决策', trace.plan));
   target.append(details('实际检索 Query', trace.retrieval_queries));
   const timeline = el('div');
-  trace.steps.forEach(step => { const row = el('div', undefined, 'step'); row.append(el('b', step.name), el('span', `${step.duration_ms.toFixed(1)} ms`), details('阶段详情', step.details)); timeline.append(row); });
+  trace.steps.forEach(step => {
+    const row = el('div', undefined, 'step'); row.dataset.stepId = step.id;
+    const anchor = el('a', step.name); anchor.href = '#trace=' + encodeURIComponent(trace.id) + '&step=' + encodeURIComponent(step.id);
+    anchor.onclick = () => { row.querySelector('details').open = true; };
+    row.append(anchor, el('span', `${step.duration_ms.toFixed(1)} ms`), details('阶段详情', {step_id:step.id, ...step.details}));
+    timeline.append(row);
+  });
   target.append(timeline);
   if (trace.rerank_comparison) {
     const comparison = trace.rerank_comparison;
@@ -123,6 +138,8 @@ function renderTrace(trace, target = $('trace')) {
   if (!trace.final_context.length) chunks.append(el('p', '未找到相关内容。请确认已入库数据。', 'muted'));
   target.append(chunks, details('所有原始候选', trace.candidates), details('完整 Trace JSON', trace));
 }
+const traceHistory = initTraceHistory({el, target:$('trace'), api, renderTrace, notice});
+let restoringTraceHistory = true;
 function message(role, text) {
   if ($('messages').querySelector('.empty')) $('messages').replaceChildren();
   const node = el('div', undefined, `message ${role}`); node.append(el('small', role === 'user' ? 'YOU' : 'ASSISTANT'), el('div', text)); $('messages').append(node); node.scrollIntoView({block:'nearest'}); return node;
@@ -144,21 +161,41 @@ function renderCitations(response) {
 }
 $('chat-form').onsubmit = async event => {
   event.preventDefault(); if (busy) return;
+  await restoredTraces;
+  if (busy) return;
   const query = $('query').value.trim(); if (!query) return;
   busy = true; $('send').disabled = true; $('clear').disabled = true;
-  const mode = $('chat-mode').value; message('user', query); notice('正在执行检索' + (mode === 'chat' ? '与回答生成…' : '…'));
+  const mode = $('chat-mode').value; const userMessage = message('user', query);
+  const handle = traceHistory.start(query); notice('正在执行检索' + (mode === 'chat' ? '与回答生成…' : '…'));
   try {
-    const response = await post(`/v1/${mode}`, {text:query, knowledge_base_id:knowledgeBaseId, history:history.slice(-12)});
+    const response = await post(`/v1/${mode}`, {text:query, knowledge_base_id:knowledgeBaseId, conversation_id:traceHistory.conversationId, history:history.slice(-12)});
     const trace = mode === 'chat' ? response.retrieval : response;
-    renderTrace(trace);
+    traceHistory.finish(handle, trace); traceHistory.link(userMessage, trace.id);
     const answer = mode === 'chat' ? response.answer.text : `召回 ${trace.candidates.length} 个候选，保留 ${trace.final_context.length} 个上下文。`;
     const node = message('assistant', answer);
+    traceHistory.link(node, trace.id);
     if (mode === 'chat') { node.append(renderCitations(response)); history.push(`User: ${query}`, `Assistant: ${answer}`); }
     $('query').value = ''; notice('执行完成，可在右侧检查完整检索过程。');
-  } catch (error) { message('assistant', `执行失败：${error.message}`); notice(error.message, true); }
+  } catch (error) {
+    const node = message('assistant', `执行失败：${error.message}`);
+    handle.summary.textContent = query + ' · 失败';
+    handle.body.textContent = error.message;
+    if (error.traceId) {
+      traceHistory.link(userMessage, error.traceId); traceHistory.link(node, error.traceId);
+      try { const record = await api('/v1/traces/' + encodeURIComponent(error.traceId)); traceHistory.finish(handle, record.trace); } catch { handle.body.append(el('p', 'Trace ID：' + error.traceId)); }
+    }
+    notice(error.message, true);
+  }
   finally { busy = false; $('send').disabled = false; $('clear').disabled = false; }
 };
-$('clear').onclick = () => { if (busy) return; history.length = 0; $('messages').replaceChildren(el('div', '新对话已准备好。', 'empty')); $('trace').replaceChildren(el('div', '等待检索执行', 'empty')); };
+$('clear').onclick = () => { if (busy || restoringTraceHistory) return; history.length = 0; traceHistory.reset(); $('messages').replaceChildren(el('div', '新对话已准备好。', 'empty')); };
+const restoredTraces = traceHistory.restore(record => {
+  const trace = record.trace;
+  traceHistory.link(message('user', trace.query.text), trace.id);
+  const text = record.answer?.text || (trace.status === 'failed' ? '执行失败：' + trace.error : trace.status === 'running' ? '执行未完成，请查看 Trace。' : `检索保留 ${trace.final_context.length} 个上下文。`);
+  const node = message('assistant', text); traceHistory.link(node, trace.id);
+  if (record.answer) { node.append(renderCitations({retrieval:trace, answer:record.answer})); history.push(`User: ${trace.query.text}`, `Assistant: ${text}`); }
+}).catch(error => notice('Trace 恢复失败：' + error.message, true)).finally(() => { restoringTraceHistory = false; });
 async function formTask(event, task) {
   event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true;
   try { await task(); } catch (error) { notice(error.message, true); } finally { button.disabled = false; }
@@ -178,6 +215,18 @@ async function loadDatasets() {
     const card = el('div', undefined, 'item'); const link = el('a', '导出 JSONL ↗'); link.href = `/v1/evaluation-datasets/${encodeURIComponent(data.id)}/export`;
     card.append(el('strong', data.name), el('p', `${data.case_count} 个样例`, 'muted'), link);
     const preview = el('button', '查看样例'); preview.onclick = async () => { preview.disabled = true; try { const full = await api(`/v1/evaluation-datasets/${encodeURIComponent(data.id)}`); const detail = details('样例 JSON', full.cases); detail.open = true; card.append(detail); preview.remove(); } catch(error) { notice(error.message, true); preview.disabled = false; } }; card.append(preview);
+    const remove = el('button', '删除测试集'); remove.type = 'button';
+    remove.onclick = async () => {
+      remove.disabled = true;
+      try {
+        if (!await askConfirmation({title: '删除测试集', message: `永久删除已导入测试集“${data.name}”？此操作无法撤销，建议先导出备份。根目录 JSONL 样例、知识库和已有评估报告不受影响。`, confirmLabel: '确认删除'})) return;
+        await api(`/v1/evaluation-datasets/${encodeURIComponent(data.id)}`, {method: 'DELETE'});
+        notice(`已删除测试集“${data.name}”；JSONL 样例和历史报告保留。`);
+        await loadDatasets();
+      } catch (error) { notice(error.message, true); }
+      finally { remove.disabled = false; }
+    };
+    card.append(remove);
     $('dataset-list').append(card); const option = el('option', data.name); option.value = data.id; $('evaluation-dataset').append(option);
   });
 }
@@ -267,29 +316,87 @@ const knowledgeButton = el('button', '▦　知识库'); knowledgeButton.dataset
 knowledgeButton.onclick = () => { showPage('knowledge'); loadKnowledgeBases().catch(error => notice(error.message, true)); };
 document.querySelector('nav').append(knowledgeButton);
 const knowledgePage = el('section', undefined, 'page'); knowledgePage.id = 'knowledge'; knowledgePage.hidden = true;
-knowledgePage.innerHTML = `<div class="heading"><div><p class="eyebrow">KNOWLEDGE BASES</p><h1>隔离、检查与重建知识库</h1><p>每个知识库拥有独立的向量集合、关键词索引与来源目录。</p></div></div><div class="workspace"><article class="panel pad"><h2>新建知识库</h2><form id="kb-form"><label>名称<input id="kb-name" maxlength="100" required placeholder="例如：产品文档"></label><button class="primary">创建并切换</button></form></article><article class="panel pad"><h2>知识库列表</h2><p class="muted">清空只删除 Document 和检索索引；原始文件与写入历史保留，可随时重建。</p><div id="kb-list"></div></article></div>`;
+knowledgePage.innerHTML = `<div class="heading"><div><p class="eyebrow">KNOWLEDGE BASES</p><h1>隔离、检查与重建知识库</h1><p>每个知识库拥有独立的向量集合、关键词索引与来源目录。</p></div></div><div class="workspace"><article class="panel pad"><h2>新建知识库</h2><form id="kb-form"><label>名称<input id="kb-name" maxlength="100" required placeholder="例如：产品文档"></label><label for="kb-embedding-source">嵌入配置来源</label><select id="kb-embedding-source"><option value="global">全局默认配置</option><option value="copy">复制当前知识库的绑定配置</option></select><p id="kb-embedding-hint" class="muted"></p><p class="muted">只创建空知识库，不复制文档或索引，也不使用工作台未应用的草稿。创建后可在配置工作台调整新库模型。</p><button class="primary">创建并切换</button></form></article><article class="panel pad"><h2>知识库列表</h2><p class="muted">清空只删除 Document 和检索索引；原始文件与写入历史保留，可随时重建。</p><div id="kb-list"></div></article></div>`;
 document.querySelector('main').append(knowledgePage);
+let knowledgeBaseItems = [];
+function updateNewKnowledgeBaseHint() {
+  const current = knowledgeBaseItems.find(item => item.id === knowledgeBaseId);
+  const source = $('kb-embedding-source');
+  source.querySelector('option[value="copy"]').disabled = !current?.embedding_binding;
+  if (source.value === 'copy' && !current?.embedding_binding) source.value = 'global';
+  const embedding = current?.embedding_binding?.settings;
+  $('kb-embedding-hint').textContent = source.value === 'copy'
+    ? `复制“${current.name}”已保存的配置：${embedding.embedding_mode} / ${embedding.embedding_model || 'hash-sha256-v1'} / ${embedding.embedding_dimensions} 维。密钥只复制环境变量引用。`
+    : '使用创建时服务的全局默认嵌入配置；当前知识库的模型和索引保持不变。';
+}
+$('kb-embedding-source').onchange = updateNewKnowledgeBaseHint;
 
 async function loadKnowledgeBases() {
   const items = await api('/v1/knowledge-bases');
+  knowledgeBaseItems = items; updateNewKnowledgeBaseHint();
   const select = $('knowledge-base'); select.replaceChildren(); $('kb-list').replaceChildren();
   items.forEach(item => {
-    const option = el('option', item.name); option.value = item.id; option.selected = item.id === knowledgeBaseId; select.append(option);
+    if (item.status === 'active') { const option = el('option', item.name); option.value = item.id; option.selected = item.id === knowledgeBaseId; select.append(option); }
     const card = el('div', undefined, 'item');
     card.append(el('strong', item.name), el('p', `${item.documents} 篇 Document · ${item.vector_chunks} 个向量 chunk · ${item.sources} 个原始来源 · ${item.runs} 条记录`, 'muted'));
+    card.append(el('p', item.embedding_binding ? `嵌入方式：${item.embedding_binding.settings.embedding_mode} · 模型：${item.embedding_binding.settings.embedding_model || 'hash-sha256-v1'} · 维度：${item.embedding_binding.settings.embedding_dimensions} · ${item.status === 'archived' ? '已弃用' : '使用中'}` : '嵌入配置待绑定：请在配置工作台确认并重建。', item.embedding_binding ? 'muted' : 'error'));
     if (item.index?.status === 'blocked' || item.index?.status === 'unavailable') card.append(el('p', `索引不可用：${item.index.reason}`, 'error'));
-    const use = el('button', item.id === knowledgeBaseId ? '当前使用' : '切换'); use.disabled = item.id === knowledgeBaseId; use.onclick = () => switchKnowledgeBase(item.id);
-    const clear = el('button', '清空索引'); clear.onclick = async () => { if (!confirm(`确认清空“${item.name}”的 Document 与检索索引？原始文件和写入历史会保留。`)) return; clear.disabled = true; try { const result = await post(`/v1/knowledge-bases/${item.id}/clear`, {}); notice(`已清空：${result.deleted_documents} 篇 Document，原始来源仍保留。`); await loadKnowledgeBases(); if (item.id === knowledgeBaseId) await loadSources(); } catch(error) { notice(error.message, true); } finally { clear.disabled = false; } };
+    const use = el('button', item.id === knowledgeBaseId ? '当前使用' : '切换'); use.disabled = item.id === knowledgeBaseId || item.status !== 'active'; use.onclick = () => switchKnowledgeBase(item.id).catch(error => notice(error.message, true));
+    const clear = el('button', '清空索引'); clear.onclick = async () => { if (!await askConfirmation({title: '清空索引', message: `确认清空“${item.name}”的 Document 与检索索引？原始文件和写入历史会保留。`})) return; clear.disabled = true; try { const result = await post(`/v1/knowledge-bases/${item.id}/clear`, {}); notice(`已清空：${result.deleted_documents} 篇 Document，原始来源仍保留。`); await loadKnowledgeBases(); if (item.id === knowledgeBaseId) await loadSources(); } catch(error) { notice(error.message, true); } finally { clear.disabled = false; } };
     const rebuild = el('button', '从原始数据重建'); rebuild.onclick = async () => { rebuild.disabled = true; notice('正在重建知识库…'); try { const result = await post(`/v1/knowledge-bases/${item.id}/rebuild`, {}); if (result.status !== 'complete') throw new Error(result.message || `重建失败：${result.error || result.status}。原始数据已保留，可重试。`); notice(`重建完成：执行 ${result.recipes} 个写入配置，恢复 ${result.documents} 篇 Document。`); await loadKnowledgeBases(); } catch(error) { notice(error.message, true); } finally { rebuild.disabled = false; } };
-    card.append(use, clear, rebuild); $('kb-list').append(card);
+    const exportChunks = el('a', '导出全部 Chunk ↗');
+    exportChunks.href = `/v1/knowledge-bases/${encodeURIComponent(item.id)}/export-chunks`;
+    exportChunks.title = 'ZIP 包含 chunks.jsonl 和 manifest.json；不含向量、密钥或原始附件。';
+    card.append(use, clear, rebuild, exportChunks); $('kb-list').append(card);
+    clear.disabled = rebuild.disabled = item.status !== 'active';
+    if (item.id !== 'default') {
+      const archive = el('button', item.status === 'archived' ? '恢复知识库' : '弃用知识库');
+      archive.onclick = async () => {
+        if (busy) return notice('请等待当前请求完成。', true);
+        if (!await askConfirmation({title: item.status === 'archived' ? '恢复知识库' : '弃用知识库', message: item.status === 'archived' ? `恢复“${item.name}”？` : `弃用“${item.name}”？数据保留，可随时恢复。`})) return;
+        try {
+          await post(`/v1/knowledge-bases/${item.id}/${item.status === 'archived' ? 'restore' : 'archive'}`, {});
+          if (item.id === knowledgeBaseId) await switchKnowledgeBase('default', true);
+          await loadKnowledgeBases();
+        } catch (error) { notice(error.message, true); }
+      };
+      const remove = el('button', '永久删除'); remove.classList.add('danger');
+      remove.onclick = async () => {
+        if (busy) return notice('请等待当前请求完成。', true);
+        const confirmation = await askConfirmation({title: '永久删除知识库', message: `永久删除“${item.name}”会删除原始文件、写入记录和检索索引，无法恢复。历史 Trace 快照保留。请输入知识库名称确认：`, input: true, placeholder: item.name, confirmLabel: '永久删除'});
+        if (confirmation === null) return;
+        try {
+          await api(`/v1/knowledge-bases/${item.id}`, {method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({confirmation_name: confirmation})});
+          if (item.id === knowledgeBaseId) await switchKnowledgeBase('default', true);
+          await loadKnowledgeBases(); notice('知识库及其来源、写入记录和索引已永久删除；历史 Trace 快照保留。');
+        } catch (error) { notice(error.message, true); }
+      };
+      card.append(archive, remove);
+    }
   });
-  if (!items.some(item => item.id === knowledgeBaseId)) switchKnowledgeBase('default');
+  if (!items.some(item => item.id === knowledgeBaseId && item.status === 'active')) await switchKnowledgeBase('default', true);
 }
-function switchKnowledgeBase(id) {
+async function switchKnowledgeBase(id, automatic = false) {
+  if (configurationWorkbench?.isBusy()) throw new Error('正在应用配置，请等待完成后切换知识库。');
+  if (busy) throw new Error('请等待当前请求完成后切换知识库。');
+  const target = await api(`/v1/knowledge-bases/${encodeURIComponent(id)}`);
+  if (target.status !== 'active') throw new Error('知识库已弃用，请先恢复。');
+  if (!automatic && configurationWorkbench?.hasDraft() && !await askConfirmation({title: '配置草稿未应用', message: '配置工作台有未应用的草稿。切换将丢弃草稿并加载目标知识库的嵌入配置。继续切换？取消可保留草稿。'})) { $('knowledge-base').value = knowledgeBaseId; return; }
+  const embedding = target.embedding_binding?.settings;
+  if (!automatic && !await askConfirmation({title: '切换知识库', message: embedding ? `切换至“${target.name}”，并在工作台加载 ${embedding.embedding_mode} / ${embedding.embedding_model || 'hash-sha256-v1'} / ${embedding.embedding_dimensions} 维？生成、规划和重排配置不变。` : `“${target.name}”尚未绑定嵌入配置。切换后请在工作台确认配置并重建。继续？`})) { $('knowledge-base').value = knowledgeBaseId; return; }
   knowledgeBaseId = id; localStorage.setItem('knowledgeBaseId', id); history.length = 0; selectedSource = null;
-  loadKnowledgeBases().catch(error => notice(error.message, true));
+  traceHistory.reset(); $('messages').replaceChildren(el('div', '知识库已切换，新对话已准备好。', 'empty'));
+  await configurationWorkbench?.reload();
+  await loadKnowledgeBases();
   notice('已切换知识库，后续写入、检索与回答均使用该库。');
 }
-$('knowledge-base').onchange = event => switchKnowledgeBase(event.target.value);
-$('kb-form').onsubmit = event => formTask(event, async () => { const item = await post('/v1/knowledge-bases', {name:$('kb-name').value.trim()}); $('kb-name').value = ''; switchKnowledgeBase(item.id); });
+$('knowledge-base').onchange = event => switchKnowledgeBase(event.target.value).catch(error => { $('knowledge-base').value = knowledgeBaseId; notice(error.message, true); });
+$('kb-form').onsubmit = event => formTask(event, async () => {
+  if (configurationWorkbench?.isBusy()) throw new Error('正在应用配置，请等待完成后新建知识库。');
+  const mode = $('kb-embedding-source').value;
+  const source = mode === 'copy' ? await api(kbPath('')) : null;
+  const payload = newKnowledgeBasePayload($('kb-name').value, mode, source?.embedding_binding);
+  const item = await post('/v1/knowledge-bases', payload);
+  $('kb-name').value = ''; await loadKnowledgeBases(); await switchKnowledgeBase(item.id);
+});
 loadKnowledgeBases().catch(error => notice(error.message, true));

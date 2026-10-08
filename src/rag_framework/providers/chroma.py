@@ -61,6 +61,24 @@ class ChromaVectorStore(VectorStore):
     async def count(self) -> int:
         return await asyncio.to_thread(self._collection.count)
 
+    async def delete_index(self) -> None:
+        await asyncio.to_thread(self._vector_store.delete_collection)
+
+    async def iter_chunks(self, *, page_size: int = 256):
+        if page_size < 1:
+            raise ValueError('page_size must be positive')
+        offset = 0
+        while True:
+            result = await asyncio.to_thread(self._collection.get, limit=page_size,
+                offset=offset, include=['documents', 'metadatas'])
+            if not result['ids']:
+                return
+            packed = {key: [result[key]] for key in ('ids', 'documents', 'metadatas')}
+            packed['distances'] = [[0.0] * len(result['ids'])]
+            for item in self._to_results(packed):
+                yield item.chunk
+            offset += len(result['ids'])
+
     def snapshot_chunks(self) -> list[Chunk]:
         result = self._collection.get(include=['documents', 'metadatas'])
         packed = {key: [result[key]] for key in ('ids', 'documents', 'metadatas')}

@@ -3,7 +3,7 @@
 import asyncio
 import json
 import sqlite3
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from time import time
 
@@ -23,6 +23,9 @@ class IndexState:
         self.vector_store = vector_store
         self.keyword_store = keyword_store
         self.lock = asyncio.Lock()
+        self.access_blocked = None
+        self.model_blocked = None
+        self.binding_required = False
         with self.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS manifest (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
@@ -54,6 +57,7 @@ class IndexState:
                     db.execute("SELECT payload FROM canonical_documents")]
 
     def begin(self, operation: str, documents: list[Document]):
+        self.check_access()
         old = self.manifest() or {}
         manifest = {
             "schema_version": 1, "state": "building", "operation": operation,
@@ -72,6 +76,9 @@ class IndexState:
         self.save({"schema_version": 1, "state": "ready",
                    "created_at": (self.manifest() or {}).get("created_at", time()),
                    "fingerprint": self.fingerprint, "updated_at": time()})
+        self.binding_required = False
+        if hasattr(self, 'on_complete'):
+            self.on_complete()
 
     def fail(self, error: Exception):
         manifest = self.manifest() or {"schema_version": 1}
@@ -79,6 +86,9 @@ class IndexState:
         self.save(manifest)
 
     async def validate(self):
+        self.check_access()
+        if self.binding_required:
+            raise IndexCompatibilityError('知识库嵌入配置待绑定，请确认模型配置并显式重建')
         manifest = self.manifest()
         if manifest is not None:
             if manifest.get("schema_version") != 1 or manifest.get("state") != "ready":
@@ -88,7 +98,7 @@ class IndexState:
             return
         has_catalog = False
         if self.source_catalog.exists():
-            with sqlite3.connect(self.source_catalog) as db:
+            with closing(sqlite3.connect(self.source_catalog)) as db:
                 has_catalog = bool(db.execute("SELECT COUNT(*) FROM documents").fetchone()[0])
         if (has_catalog or self.documents() or await self.vector_store.count()
                 or await self.keyword_store.count()):
@@ -104,3 +114,7 @@ class IndexState:
                     "expected": self.fingerprint}
         except Exception as exc:  # noqa: BLE001 - Keep admin available during provider outages.
             return {"status": "unavailable", "reason": type(exc).__name__}
+
+    def check_access(self):
+        if self.access_blocked or self.model_blocked:
+            raise IndexCompatibilityError(self.access_blocked or self.model_blocked)

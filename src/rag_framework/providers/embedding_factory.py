@@ -12,12 +12,14 @@ from rag_framework.core.vectors import EmbeddingError, validate_vectors
 from rag_framework.providers.algorithm_factory import AlgorithmRegistry
 from rag_framework.providers.hash_embedder import HashEmbedder
 from rag_framework.providers.local_embedder import SentenceTransformerEmbedder
+from rag_framework.providers.sdk_embeddings import OpenAIEmbedder, DashScopeEmbedder
 
 
 class CompatibleEmbedder(Embedder):
     def __init__(self, settings: Settings, *, client: httpx.AsyncClient | None = None):
         if not settings.embedding_model or not settings.embedding_base_url or not settings.embedding_api_key:
-            raise ValueError("Remote embeddings require model, base URL and API key")
+            missing = [name for name in ('embedding_model', 'embedding_base_url', 'embedding_api_key') if not getattr(settings, name)]
+            raise ValueError('远程嵌入缺少配置：' + '、'.join(missing) + '。密钥请通过服务端环境变量或 .env 配置，并检查知识库密钥引用。')
         parsed = urlsplit(settings.embedding_base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment or parsed.username:
             raise ValueError("Embedding base URL must be HTTP(S), without credentials/query/fragment")
@@ -71,6 +73,8 @@ embedders = AlgorithmRegistry(Embedder)
 embedders.register("hash", lambda s: HashEmbedder(s.embedding_dimensions))
 embedders.register("compatible", CompatibleEmbedder)
 embedders.register("sentence_transformers", SentenceTransformerEmbedder)
+embedders.register('openai', OpenAIEmbedder)
+embedders.register('dashscope', DashScopeEmbedder)
 
 
 def build_embedder(settings: Settings) -> EmbeddingRuntime:
@@ -83,7 +87,7 @@ def build_embedder(settings: Settings) -> EmbeddingRuntime:
         "model": "hash-sha256-v1" if mode == "hash" else settings.embedding_model,
         "revision": settings.embedding_model_revision,
         "dimensions": settings.embedding_dimensions,
-        "endpoint_digest": hashlib.sha256((settings.embedding_base_url or "").rstrip("/").encode()).hexdigest()
+        "endpoint_digest": hashlib.sha256(getattr(embedder, 'endpoint', settings.embedding_base_url or '').rstrip('/').encode()).hexdigest()
             if mode != "hash" else None,
     }
     if mode == "sentence_transformers":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -40,6 +41,7 @@ from rag_framework.knowledge_bases import knowledge_base_router
 from rag_framework.presets import Preset, config_snapshot, export_preset, validate_preset
 from rag_framework.service import build_service
 from rag_framework.sources.api import source_router
+from rag_framework.traces import TraceStore, capture, complete
 
 
 class IndexDocumentsRequest(BaseModel):
@@ -67,11 +69,31 @@ retrieval_evaluator = service.retrieval_evaluator()
 rag_evaluator = service.rag_evaluator()
 
 
+_service_runtime_change = knowledge_bases.on_runtime_change
+
+
+def refresh_runtime_aliases(key):
+    global default_runtime, keyword_store, default_source_service, retrieval_evaluator, rag_evaluator
+    _service_runtime_change(key)
+    if key == 'default':
+        default_runtime = knowledge_bases.runtime(key)
+        keyword_store, default_source_service = default_runtime.keyword_store, default_runtime.sources
+        retrieval_evaluator, rag_evaluator = service.retrieval_evaluator(), service.rag_evaluator()
+
+
+knowledge_bases.on_runtime_change = refresh_runtime_aliases
+
+
+class DefaultSourceProxy:
+    def __getattr__(self, name):
+        return getattr(knowledge_bases.runtime('default').sources, name)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Keep management endpoints available so blocked legacy indexes can be rebuilt.
     app.state.index_checks = {
-        item.id: await knowledge_bases.runtime(item.id).index_state.describe()
+        item.id: (await knowledge_bases.describe(item.id)).get('index')
         for item in knowledge_bases.list()
     }
     yield
@@ -104,7 +126,7 @@ async def apply_configuration(payload: dict):
         if payload.get('expected_version') != state['version']:
             raise HTTPException(409, '配置已更新，请重新读取后再应用')
         candidate = payload.get('preset')
-        validation = validate_draft(candidate)
+        validation = validate_draft(candidate, settings)
         if not validation['valid']:
             return {**validation, 'applied': False}
         preset = validate_preset(candidate, type(settings).model_fields)
@@ -156,7 +178,7 @@ async def get_config_schema():
 @app.post('/v1/config/draft/validate')
 async def check_config_draft(payload: dict):
     from rag_framework.config_workbench import validate_draft
-    return validate_draft(payload)
+    return validate_draft(payload, settings)
 
 
 @app.get("/v1/config/preset", response_model=Preset)
@@ -234,7 +256,63 @@ async def retrieve(query: Query) -> RetrievalTrace:
         runtime = knowledge_bases.runtime(query.knowledge_base_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
-    return await runtime.retriever.retrieve(query)
+    return await recorded_run(query, runtime.retriever.retrieve)
+
+
+def trace_store():
+    return TraceStore(settings.source_directory.parent / 'traces' / 'traces.sqlite3')
+
+
+async def recorded_run(query, operation):
+    trace = None
+    store = trace_store()
+    try:
+        async with capture(store, query) as trace:
+            result = await operation(query)
+            answer = result.answer.model_dump(mode='json') if isinstance(result, RAGResponse) else None
+            await complete(store, trace, answer)
+            return result
+    except Exception as exc:
+        status = exc.status_code if isinstance(exc, HTTPException) else (
+            409 if isinstance(exc, IndexCompatibilityError) else 500)
+        raise HTTPException(status_code=status, detail={
+            'message': '执行失败，可通过 Trace ID 检查已完成阶段。',
+            'error': type(exc).__name__, 'trace_id': trace.id if trace else None,
+        }) from exc
+
+
+@app.get('/v1/traces')
+async def list_traces(conversation_id: str | None = None,
+                      limit: int = QueryParameter(default=100, ge=1, le=500)):
+    records = await asyncio.to_thread(trace_store().list, conversation_id, limit)
+    return [trace_knowledge_base_status(record) for record in records]
+
+
+def trace_knowledge_base_status(record):
+    key = record['trace']['query'].get('knowledge_base_id', 'default')
+    try:
+        status = knowledge_bases.get(key).status
+    except KeyError:
+        status = 'deleted'
+    record['trace']['knowledge_base_status'] = status
+    return record
+
+
+@app.get('/v1/traces/{trace_id}')
+async def get_trace(trace_id: str):
+    record = await asyncio.to_thread(trace_store().get, trace_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail='Trace not found')
+    return trace_knowledge_base_status(record)
+
+
+@app.get('/v1/traces/{trace_id}/steps/{step_id}')
+async def get_trace_step(trace_id: str, step_id: str):
+    record = await get_trace(trace_id)
+    for step in record['trace']['steps']:
+        if step['id'] == step_id:
+            return {'trace_id': trace_id, 'step': step}
+    raise HTTPException(status_code=404, detail='Trace step not found')
 
 
 @app.post("/v1/evaluations/retrieval", response_model=RetrievalEvaluationReport)
@@ -366,6 +444,17 @@ async def get_evaluation_dataset(dataset_id: str) -> EvaluationDataset:
     return dataset
 
 
+@app.delete('/v1/evaluation-datasets/{dataset_id}')
+async def delete_evaluation_dataset(dataset_id: str):
+    try:
+        deleted = evaluation_dataset_store.delete(dataset_id)
+    except OSError:
+        raise HTTPException(500, '测试集删除失败，请检查存储权限；历史报告及样例文件未删除') from None
+    if not deleted:
+        raise HTTPException(404, '测试集不存在或已删除')
+    return {'deleted': True, 'dataset_id': dataset_id}
+
+
 @app.get("/v1/evaluation-datasets/{dataset_id}/export")
 async def export_evaluation_dataset(dataset_id: str) -> Response:
     content = evaluation_dataset_store.export_jsonl(dataset_id)
@@ -393,7 +482,7 @@ async def chat(query: Query) -> RAGResponse:
         runtime = knowledge_bases.runtime(query.knowledge_base_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
-    return await runtime.generation_pipeline.run(query)
+    return await recorded_run(query, runtime.generation_pipeline.run)
 
 
 @app.post("/v1/chat/stream")
@@ -403,23 +492,30 @@ async def stream_chat(query: Query) -> StreamingResponse:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Knowledge base not found") from exc
 
-    await runtime.indexing_pipeline.check_index()
-
     async def events():
+        trace = None
+        store = trace_store()
         try:
-            async for event in runtime.generation_pipeline.stream(query):
-                payload = json.dumps(event.data, ensure_ascii=False, default=str)
-                yield f"event: {event.type}\ndata: {payload}\n\n"
+            async with capture(store, query) as trace:
+                yield f"event: trace\ndata: {json.dumps({'trace_id': trace.id})}\n\n"
+                await runtime.indexing_pipeline.check_index()
+                async for event in runtime.generation_pipeline.stream(query):
+                    if event.type == 'complete':
+                        await complete(store, trace, event.data['answer'])
+                        event.data['trace'] = trace.model_dump(mode='json')
+                    payload = json.dumps(event.data, ensure_ascii=False, default=str)
+                    yield f"event: {event.type}\ndata: {payload}\n\n"
         except Exception as exc:  # noqa: BLE001 - Convert provider failure to a terminal SSE event.
             payload = json.dumps(
-                {"error": type(exc).__name__, "message": "Answer generation failed."}
+                {"error": type(exc).__name__, "message": "Answer generation failed.",
+                 "trace_id": trace.id if trace else None}
             )
             yield f"event: error\ndata: {payload}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
-app.include_router(source_router(default_source_service))
+app.include_router(source_router(DefaultSourceProxy()))
 app.include_router(knowledge_base_router(knowledge_bases))
 
 # Registered last so the console never shadows API routes.

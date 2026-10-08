@@ -63,7 +63,10 @@ class AdaptiveRetriever(Retriever):
         self.reranker_fail_open = reranker_fail_open
 
     async def retrieve(self, query: Query) -> RetrievalTrace:
-        trace = RetrievalTrace(query=query)
+        from rag_framework.traces import current_trace
+        trace = current_trace.get()
+        if trace is None:
+            trace = RetrievalTrace(query=query)
         started = perf_counter()
         plan = await self.planner.plan(query)
         planned_top_k = plan.top_k

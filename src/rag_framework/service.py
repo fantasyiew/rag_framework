@@ -16,6 +16,12 @@ from rag_framework.knowledge_bases import (
     KnowledgeBaseManager,
     KnowledgeBaseRuntime,
 )
+from rag_framework.knowledge_bases.bindings import (
+    BindingStore,
+    bound_embedder,
+    embedding_profile,
+    profile_settings,
+)
 from rag_framework.pipeline.generation import GenerationPipeline
 from rag_framework.pipeline.managed import ManagedIndexingPipeline, ManagedRetriever
 from rag_framework.presets import config_snapshot
@@ -27,7 +33,6 @@ from rag_framework.providers import (
     create_keyword_store,
 )
 from rag_framework.providers.algorithm_factory import build_chunker, build_fusion
-from rag_framework.providers.embedding_factory import build_embedder
 from rag_framework.providers.vector_factory import build_vector_store
 from rag_framework.sources.service import SourceService
 
@@ -55,7 +60,7 @@ class ServiceRuntime:
     embedder: Any = None
     _closed: bool = False
 
-    def audit_snapshot(self):
+    def audit_snapshot(self, knowledge_base_id: str | None = None):
         snapshot = config_snapshot(self.settings)
         from rag_framework.hot_config import read_state
         snapshot['config_version'] = read_state(self.settings.managed_config_path)['version']
@@ -64,13 +69,16 @@ class ServiceRuntime:
                    "implementation": info.implementation}
             for name, info in self.components.items()
         }
+        if knowledge_base_id is not None:
+            snapshot['knowledge_base_id'] = knowledge_base_id
+            snapshot['embedding_binding'] = self.knowledge_bases.bindings.get(knowledge_base_id)
         return snapshot
 
     def retrieval_evaluator(self, knowledge_base_id: str = "default"):
         return RetrievalEvaluator(
             self.knowledge_bases.runtime(knowledge_base_id).retriever,
             self.evaluation_store, concurrency=self.settings.evaluation_concurrency,
-            config_snapshot=self.audit_snapshot(),
+            config_snapshot=self.audit_snapshot(knowledge_base_id),
             metrics=self.settings.evaluation_metrics,
         )
 
@@ -80,7 +88,7 @@ class ServiceRuntime:
             self.evaluation_store, concurrency=self.settings.evaluation_concurrency,
             judge=self.judge_runtime.judge,
             metrics=self.settings.evaluation_metrics,
-            config_snapshot=self.audit_snapshot(),
+            config_snapshot=self.audit_snapshot(knowledge_base_id),
         )
 
     async def close(self):
@@ -90,18 +98,16 @@ class ServiceRuntime:
         try:
             await self.knowledge_bases.close()
         finally:
-            try:
-                if isinstance(self.reranker, AsyncClosable):
-                    await self.reranker.close()
-            finally:
-                if isinstance(self.embedder, AsyncClosable):
-                    await self.embedder.close()
+            if isinstance(self.reranker, AsyncClosable):
+                await self.reranker.close()
 
 
 def build_service(settings: Settings) -> ServiceRuntime:
     from rag_framework.evaluation.registry import select_metrics
     select_metrics(settings.evaluation_metrics)
-    embedding = build_embedder(settings)
+    bindings = BindingStore(settings.knowledge_base_directory)
+    default_profile = bindings.get('default')
+    embedding = bound_embedder(profile_settings(settings, default_profile) if default_profile else settings, default_profile)
     embedder = embedding.embedder
     planner_runtime = build_query_planner(settings)
     generator_runtime = build_answer_generator(settings)
@@ -109,18 +115,24 @@ def build_service(settings: Settings) -> ServiceRuntime:
     reranker = build_reranker(settings)
 
     def runtime_factory(knowledge_base_id: str) -> KnowledgeBaseRuntime:
+        profile = bindings.get(knowledge_base_id)
+        runtime_settings = profile_settings(settings, profile) if profile else settings
+        runtime_embedding = embedding if knowledge_base_id == 'default' and not hasattr(runtime_factory, 'default_built') else bound_embedder(runtime_settings, profile)
+        if knowledge_base_id == 'default':
+            runtime_factory.default_built = True
+        runtime_embedder = runtime_embedding.embedder
         suffix = "" if knowledge_base_id == "default" else f"_{knowledge_base_id}"
         base_collection = settings.qdrant_collection if settings.vector_backend == 'qdrant' else settings.chroma_collection
         vector_directory = settings.qdrant_directory if settings.vector_backend == 'qdrant' else settings.chroma_directory
         collection = f"{base_collection}{suffix}"
         index_name = f"{settings.elasticsearch_index}{suffix}"
-        runtime_vector_store = build_vector_store(settings, collection_name=collection)
+        runtime_vector_store = build_vector_store(runtime_settings, collection_name=collection)
         runtime_keyword_store = create_keyword_store(settings, index_name=index_name)
         chunker = build_chunker(settings)
         source_directory = (settings.source_directory if knowledge_base_id == "default" else
                             settings.knowledge_base_directory / knowledge_base_id / "sources")
         state = IndexState(source_directory, {
-            "embedding": embedding.fingerprint,
+            "embedding": runtime_embedding.fingerprint,
             "chunker": {"implementation": type(chunker).__module__ + "." + type(chunker).__qualname__,
                         "parameters": chunker.parameters},
             "vector": {"backend": settings.vector_backend,
@@ -134,6 +146,15 @@ def build_service(settings: Settings) -> ServiceRuntime:
         from rag_framework.providers.bm25 import InMemoryBM25KeywordStore
         memory_index = getattr(runtime_keyword_store, 'fallback', runtime_keyword_store)
         manifest = state.manifest()
+        if runtime_embedding.active_mode == 'unavailable':
+            state.model_blocked = '绑定的嵌入模型不可用，请检查配置和密钥环境变量'
+        state.on_complete = lambda: bindings.save(knowledge_base_id,
+            bindings.get(knowledge_base_id) or embedding_profile(runtime_settings, runtime_embedding.active_mode))
+        if profile is None:
+            if manifest and manifest.get('fingerprint', {}).get('embedding') == runtime_embedding.fingerprint:
+                bindings.save(knowledge_base_id, embedding_profile(runtime_settings, runtime_embedding.active_mode))
+            elif manifest or state.documents():
+                state.binding_required = True
         if (isinstance(memory_index, InMemoryBM25KeywordStore)
                 and isinstance(runtime_vector_store, ChunkSnapshot)
                 and manifest and manifest.get('state') == 'ready'
@@ -141,11 +162,11 @@ def build_service(settings: Settings) -> ServiceRuntime:
             # Restore only actual indexed chunks, never cleared or failed recovery archives.
             memory_index.restore_chunks(runtime_vector_store.snapshot_chunks())
         runtime_indexing = ManagedIndexingPipeline(
-            chunker, embedder, runtime_vector_store, runtime_keyword_store, state=state
+            chunker, runtime_embedder, runtime_vector_store, runtime_keyword_store, state=state
         )
         runtime_retriever = ManagedRetriever(
             runtime_vector_store,
-            embedder,
+            runtime_embedder,
             planner_runtime.planner,
             runtime_keyword_store,
             reranker=reranker,
@@ -166,6 +187,8 @@ def build_service(settings: Settings) -> ServiceRuntime:
         runtime_retriever.config_identity = {
             'version': read_state(settings.managed_config_path)['version'],
             'config_hash': config_snapshot(settings)['config_hash'],
+            'knowledge_base_id': knowledge_base_id,
+            'embedding_fingerprint': runtime_embedding.fingerprint,
         }
         runtime_sources = SourceService(
             source_directory, runtime_indexing
@@ -178,10 +201,16 @@ def build_service(settings: Settings) -> ServiceRuntime:
             generation_pipeline=runtime_generation,
             sources=runtime_sources,
             index_state=state,
+            embedder=runtime_embedder,
         )
     
     default = runtime_factory("default")
     manager = KnowledgeBaseManager(settings.knowledge_base_directory, default, runtime_factory)
+    manager.bindings = bindings
+    manager.default_profile = lambda: embedding_profile(settings,
+        ('compatible' if settings.embedding_api_key else 'hash') if settings.embedding_mode == 'auto'
+        else settings.embedding_mode)
+    manager.validate_profile = lambda profile: profile_settings(settings, profile)
     components = {
         "embedding": ComponentInfo(embedding.configured_mode, embedding.active_mode,
                                    type(embedder).__name__, embedding.fingerprint,
@@ -217,7 +246,7 @@ def build_service(settings: Settings) -> ServiceRuntime:
             runtime.configured_mode, runtime.active_mode, type(component).__name__,
             fallback_reason=runtime.fallback_reason,
         )
-    return ServiceRuntime(
+    service = ServiceRuntime(
         settings, manager, planner_runtime, generator_runtime, judge_runtime, reranker,
         EvaluationStore(limit=settings.evaluation_report_limit,
                         directory=settings.evaluation_report_directory),
@@ -225,3 +254,15 @@ def build_service(settings: Settings) -> ServiceRuntime:
                                max_cases=settings.evaluation_dataset_max_cases),
         components, embedder=embedder,
     )
+
+    def runtime_changed(key):
+        if key == 'default':
+            runtime = manager.runtime(key)
+            service.embedder = runtime.embedder
+            fingerprint = runtime.index_state.fingerprint['embedding']
+            service.components['embedding'] = ComponentInfo(
+                manager.bindings.get(key)['settings']['embedding_mode'],
+                fingerprint.get('provider', 'unavailable'), type(runtime.embedder).__name__, fingerprint)
+
+    manager.on_runtime_change = runtime_changed
+    return service

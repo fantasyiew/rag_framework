@@ -68,7 +68,7 @@ async def test_custom_algorithms_in_service_and_ingestion(tmp_path, monkeypatch)
         chroma_directory=tmp_path / "chroma", source_directory=tmp_path / "sources",
         knowledge_base_directory=tmp_path / "bases",
         evaluation_report_directory=tmp_path / "reports",
-        evaluation_dataset_directory=tmp_path / "datasets",
+        evaluation_dataset_directory=tmp_path / "test_datasets",
     )
     service = build_service(config)
     try:

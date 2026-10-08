@@ -1,4 +1,4 @@
-"""Persistent evaluation datasets with a portable JSON Lines representation."""
+"""Persistent evaluation test_datasets with a portable JSON Lines representation."""
 
 from __future__ import annotations
 
@@ -88,6 +88,20 @@ class EvaluationDatasetStore:
             )
             for dataset in sorted(datasets, key=lambda item: item.updated_at, reverse=True)
         ]
+
+    def delete(self, dataset_id: str) -> bool:
+        """Delete only the named imported record, never JSONL sources or reports."""
+        try:
+            path = self._path(dataset_id)
+        except ValueError:
+            return False
+        if path.is_symlink():
+            raise OSError('Refusing to delete a linked dataset record')
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        return True
 
     def export_jsonl(self, dataset_id: str) -> str | None:
         dataset = self.get(dataset_id)

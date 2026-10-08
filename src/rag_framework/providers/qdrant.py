@@ -77,6 +77,22 @@ class QdrantVectorStore(VectorStore):
     async def count(self):
         return await self._run(self._count)
 
+    async def iter_chunks(self, *, page_size: int = 256):
+        if page_size < 1:
+            raise ValueError('page_size must be positive')
+        offset = None
+        while True:
+            def page():
+                if not self.client.collection_exists(self.collection):
+                    return [], None
+                return self.client.scroll(self.collection, limit=page_size, offset=offset,
+                    with_payload=True, with_vectors=False)
+            points, offset = await self._run(page)
+            for point in points:
+                yield Chunk.model_validate(point.payload['chunk'])
+            if offset is None:
+                return
+
     def snapshot_chunks(self):
         with self.lock:
             if not self.client.collection_exists(self.collection):
@@ -93,6 +109,11 @@ class QdrantVectorStore(VectorStore):
         def clear_collection():
             count = self._count()
             if self.client.collection_exists(self.collection):
+                # Local Qdrant deletion may silently leave SQLite files open on Windows.
+                # Close the collection storage before removing it so a new dimension
+                # cannot reload vectors from the previous collection.
+                local = self.client._client
+                local.collections[self.collection].close()
                 self.client.delete_collection(self.collection)
             return count
         return await self._run(clear_collection)
