@@ -1,4 +1,7 @@
 const $ = (id) => document.getElementById(id);
+import {consumeEvaluation} from './evaluation-progress.js?v=20261019';
+import {appendReportSnapshot} from './report-snapshot.js?v=20261019';
+import {reportTitle} from './report-title.js?v=20261019';
 import {initConfiguration} from './config.js?v=20261006-credentials';
 import {newKnowledgeBasePayload} from './knowledge-create.js?v=20261005';
 import {askConfirmation} from './confirm.js?v=20261005';
@@ -11,6 +14,7 @@ queueMicrotask(() => { configurationWorkbench = initConfiguration({el, $, api, p
   getKnowledgeBaseId: () => knowledgeBaseId, reloadKnowledgeBases: loadKnowledgeBases, askConfirmation}); });
 let busy = false;
 let reportRequest = 0;
+let reportsListRequest = 0, datasetsListRequest = 0;
 let knowledgeBaseId = localStorage.getItem('knowledgeBaseId') || 'default';
 const documentCache = new Map();
 const kbPath = suffix => `/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}${suffix}`;
@@ -209,7 +213,11 @@ $('index-form').onsubmit = event => formTask(event, async () => {
   notice(`本次接收 ${result.received_documents} 篇，新增 ${result.created_documents} 篇，跳过 ${result.skipped_documents} 篇，新增 ${result.created_chunks} 个 chunk。`); $('document').value = '';
 });
 async function loadDatasets() {
-  const datasets = await api('/v1/evaluation-datasets'); $('dataset-list').replaceChildren(); $('evaluation-dataset').replaceChildren();
+  const request = ++datasetsListRequest;
+  const selectedDataset = $('evaluation-dataset').value;
+  const datasets = await api('/v1/evaluation-datasets');
+  if (request !== datasetsListRequest) return;
+  $('dataset-list').replaceChildren(); $('evaluation-dataset').replaceChildren();
   if (!datasets.length) $('dataset-list').append(el('p', '暂无测试集，请先导入 JSONL 文件。', 'muted'));
   datasets.forEach(data => {
     const card = el('div', undefined, 'item'); const link = el('a', '导出 JSONL ↗'); link.href = `/v1/evaluation-datasets/${encodeURIComponent(data.id)}/export`;
@@ -226,31 +234,107 @@ async function loadDatasets() {
       } catch (error) { notice(error.message, true); }
       finally { remove.disabled = false; }
     };
-    card.append(remove);
+    const rename = el('button', '重命名'); rename.type = 'button';
+    rename.onclick = async () => {
+      rename.disabled = true;
+      try {
+        const name = await askConfirmation({title:'修改测试集名称', message:`当前名称：“${data.name}”。请输入新名称（最多200字），用例、ID和历史报告关联保持不变。`, input:true, placeholder:data.name, confirmLabel:'保存名称'});
+        if (name === null) return;
+        if (name.trim().length > 200) throw new Error('名称不能超过200字');
+        const updated = await api(`/v1/evaluation-datasets/${encodeURIComponent(data.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim()})});
+        await loadDatasets(); notice(`测试集已重命名为“${updated.name}”。`);
+      } catch (error) { notice(error.message, true); }
+      finally { rename.disabled = false; }
+    };
+    card.append(rename, remove);
     $('dataset-list').append(card); const option = el('option', data.name); option.value = data.id; $('evaluation-dataset').append(option);
   });
+  if (Array.from($('evaluation-dataset').options).some(option => option.value === selectedDataset)) $('evaluation-dataset').value = selectedDataset;
 }
 $('dataset-form').onsubmit = event => formTask(event, async () => {
   const file = $('dataset-file').files[0]; const name = $('dataset-name').value.trim(); if (!file || !name) throw new Error('请填写名称并选择 JSONL 文件');
   await api(`/v1/evaluation-datasets/import?name=${encodeURIComponent(name)}`, {method:'POST', headers:{'Content-Type':'application/x-ndjson'}, body:file});
   notice('测试集导入成功。'); await loadDatasets();
 });
-$('evaluation-form').onsubmit = event => formTask(event, async () => {
+const evaluationProgress = el('div'); evaluationProgress.hidden = true;
+evaluationProgress.setAttribute('role', 'status'); evaluationProgress.setAttribute('aria-live', 'polite');
+const evaluationBar = el('progress'); evaluationBar.style.cssText = 'width:100%;height:18px';
+const evaluationText = el('p'); evaluationProgress.append(evaluationBar, evaluationText);
+$('evaluation-form').after(evaluationProgress);
+let evaluating = false;
+$('evaluation-form').onsubmit = event => {
+  if (evaluating) { event.preventDefault(); return; }
+  return formTask(event, async () => {
   const id = $('evaluation-dataset').value; if (!id) throw new Error('请先导入测试集');
-  notice('评估运行中，请等待结果。');
-  const report = await post(`/v1/evaluations/${$('evaluation-kind').value}/datasets/${encodeURIComponent(id)}`, {knowledge_base_id:knowledgeBaseId, k:Number($('evaluation-k').value), include_trace:true});
+  const kind = $('evaluation-kind').value;
+  const payload = {knowledge_base_id:knowledgeBaseId, k:Number($('evaluation-k').value), include_trace:true};
+  evaluating = true; evaluationProgress.hidden = false; evaluationBar.removeAttribute('value');
+  evaluationText.textContent = '正在准备评估…';
+  const controls = [$('evaluation-dataset'), $('evaluation-kind'), $('evaluation-k'), $('knowledge-base')];
+  controls.forEach(control => { control.disabled = true; });
+  try {
+  notice('评估运行中，下方显示实际完成进度。');
+  const response = await fetch(`/v1/evaluations/${kind}/datasets/${encodeURIComponent(id)}/stream`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const report = await consumeEvaluation(response, (event, data) => {
+    if (event === 'start' || event === 'progress') {
+      evaluationBar.max = data.total; evaluationBar.value = data.completed;
+      evaluationText.textContent = `已完成 ${data.completed}/${data.total}（${Math.floor(data.completed / data.total * 100)}%） · 成功 ${data.successful} · 失败 ${data.failed}` + (data.completed === data.total ? ' · 正在保存报告…' : ' · 未完成用例仍在执行');
+    }
+  });
+  evaluationText.textContent = `评估结束：${report.case_count}/${report.case_count} · 成功 ${report.successful_case_count} · 失败 ${report.case_count - report.successful_case_count}`;
   showPage('experiments'); renderReport(report); notice(`评估结束：${report.successful_case_count}/${report.case_count} 个样例成功。`);
-});
+  } catch (error) {
+    evaluationText.textContent += ' · 已中断：' + error.message;
+    throw error;
+  } finally { evaluating = false; controls.forEach(control => { control.disabled = false; }); }
+  });
+};
 async function loadReports() {
-  const reports = await api('/v1/evaluations'); $('report-list').replaceChildren();
+  const request = ++reportsListRequest;
+  const reports = await api('/v1/evaluations');
+  if (request !== reportsListRequest) return;
+  $('report-list').replaceChildren();
   if (!reports.length) $('report-list').append(el('p', '暂无实验记录，从测试集页面开始评估。', 'muted'));
   reports.forEach(report => {
-    const button = el('button', `${report.kind.toUpperCase()} · ${report.status}`, 'report-button'); button.append(el('small', `${new Date(report.started_at * 1000).toLocaleString()} · ${report.successful_case_count}/${report.case_count} 成功`));
-    button.onclick = async () => { const request = ++reportRequest; try { const data = await api(`/v1/evaluations/${encodeURIComponent(report.id)}`); if (request === reportRequest) renderReport(data); } catch(error) { notice(error.message, true); } }; $('report-list').append(button);
+    const button = el('button', `${reportTitle(report)} · ${report.status}`, 'report-button'); button.append(el('small', `${report.kind.toUpperCase()} · ${new Date(report.started_at * 1000).toLocaleString()} · ${report.successful_case_count}/${report.case_count} 成功`));
+    button.onclick = async () => { const request = ++reportRequest; try { const data = await api(`/v1/evaluations/${encodeURIComponent(report.id)}`); if (request === reportRequest) renderReport(data); } catch(error) { notice(error.message, true); } };
+    const remove = el('button', '删除报告'); remove.type = 'button';
+    const rename = el('button', '重命名'); rename.type = 'button';
+    rename.onclick = async () => {
+      rename.disabled = remove.disabled = button.disabled = true;
+      let saved = false;
+      try {
+        const name = await askConfirmation({title:'修改报告名称', message:`当前名称：“${reportTitle(report)}”。请输入新名称（最多200字）。只修改展示名称，不更改评估结果、ID或配置快照。`, input:true, placeholder:reportTitle(report), confirmLabel:'保存名称'});
+        if (name === null) return;
+        if (name.trim().length > 200) throw new Error('名称不能超过200字');
+        const updated = await api(`/v1/evaluations/${encodeURIComponent(report.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim()})});
+        saved = true; ++reportRequest;
+        if ($('report-detail').dataset.reportId === report.id) renderReport(updated);
+        await loadReports(); notice(`报告已重命名为“${updated.name}”。`);
+      } catch (error) { notice((saved ? '名称已保存，但页面刷新失败：' : '') + error.message, true); }
+      finally { rename.disabled = remove.disabled = button.disabled = false; }
+    };
+    remove.onclick = async () => {
+      rename.disabled = remove.disabled = button.disabled = true;
+      try {
+        if (!await askConfirmation({title:'删除测试报告', message:`永久删除这份 ${report.kind.toUpperCase()} 评估报告（${new Date(report.started_at * 1000).toLocaleString()}）？报告及内嵌结果无法恢复。测试集、知识库、独立配置快照和 Trace 保留。`, confirmLabel:'确认删除'})) return;
+        await api(`/v1/evaluations/${encodeURIComponent(report.id)}`, {method:'DELETE'});
+        ++reportRequest;
+        if ($('report-detail').dataset.reportId === report.id) {
+          $('report-detail').replaceChildren(el('p', '报告已删除，请选择其他报告。', 'muted'));
+          delete $('report-detail').dataset.reportId;
+        }
+        await loadReports(); notice('报告已删除；独立配置快照、Trace 和测试集保留。');
+      } catch (error) { notice(error.message, true); }
+      finally { rename.disabled = remove.disabled = button.disabled = false; }
+    };
+    const item = el('div', undefined, 'item'); item.append(button, rename, remove); $('report-list').append(item);
   });
 }
 function renderReport(report) {
-  const target = $('report-detail'); target.className = ''; target.replaceChildren(el('h2', `${report.kind.toUpperCase()} 评估结果`), el('p', `${report.status} · K=${report.k} · ${report.duration_ms.toFixed(0)} ms`, 'muted'));
+  $('report-detail').dataset.reportId = report.id;
+  const target = $('report-detail'); target.className = ''; target.replaceChildren(el('h2', reportTitle(report)), el('p', `${report.kind.toUpperCase()} · ${report.status} · K=${report.k} · ${report.duration_ms.toFixed(0)} ms`, 'muted'));
+  appendReportSnapshot({report, target, el, table, details});
   const metrics = report.metrics || report.retrieval_metrics;
   if (metrics) target.append(table(['检索指标', '重排前', '重排后', '变化'], Object.keys(metrics.before).map(key => [key, score(metrics.before[key]), score(metrics.after[key]), score(metrics.delta[key])])));
   if (report.answer_metrics) { target.append(el('h3', '回答质量'), details('评估方法与回退信息', report.answer_metrics)); target.append(table(['回答指标', '分数'], Object.entries(report.answer_metrics).filter(([,v]) => typeof v === 'number').map(([k,v]) => [k, score(v)]))); }

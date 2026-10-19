@@ -125,6 +125,7 @@ class EvaluationCaseResult(BaseModel):
 
 
 class RetrievalEvaluationReport(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
     metric_extensions: dict[str, float | None] = Field(default_factory=dict)
     config_snapshot: dict[str, Any] | None = None
     knowledge_base_id: str = "default"
@@ -142,6 +143,7 @@ class RetrievalEvaluationReport(BaseModel):
 
 
 class EvaluationReportSummary(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
     kind: Literal["retrieval"] = "retrieval"
     id: str
     status: Literal["complete", "partial", "failed"]
@@ -169,6 +171,7 @@ class RAGEvaluationCaseResult(BaseModel):
 
 
 class RAGEvaluationReport(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
     metric_extensions: dict[str, float | None] = Field(default_factory=dict)
     config_snapshot: dict[str, Any] | None = None
     knowledge_base_id: str = "default"
@@ -187,6 +190,7 @@ class RAGEvaluationReport(BaseModel):
 
 
 class RAGEvaluationReportSummary(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
     kind: Literal["rag"] = "rag"
     id: str
     status: Literal["complete", "partial", "failed"]

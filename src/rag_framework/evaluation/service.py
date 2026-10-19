@@ -39,6 +39,14 @@ class EvaluationStore:
             self.directory.mkdir(parents=True, exist_ok=True)
             self._load()
 
+    def save_snapshot(self, snapshot):
+        if self.directory is not None:
+            from uuid import UUID
+
+            from rag_framework.hot_config import write_state
+            identifier = str(UUID(snapshot['snapshot_id']))
+            write_state(self.directory / 'snapshots' / f'{identifier}.json', snapshot)
+
     def save(self, report: EvaluationReport) -> None:
         self._reports[report.id] = report
         self._reports.move_to_end(report.id)
@@ -48,6 +56,31 @@ class EvaluationStore:
             report_id, _ = self._reports.popitem(last=False)
             if self.directory is not None:
                 self._path(report_id).unlink(missing_ok=True)
+
+    def rename(self, report_id: str, name: str) -> EvaluationReport:
+        report = self.get(report_id)
+        if report is None:
+            raise KeyError(report_id)
+        renamed = type(report).model_validate({**report.model_dump(), 'name': name.strip()})
+        if self.directory is not None:
+            if self._path(report_id).is_symlink():
+                raise OSError('Refusing to modify a linked report')
+            # Persist first, then replace memory only on success. Keep list ordering unchanged.
+            self._write(renamed)
+        self._reports[report_id] = renamed
+        return renamed
+
+    def delete(self, report_id: str) -> bool:
+        if report_id not in self._reports:
+            return False
+        if self.directory is not None:
+            path = self._path(report_id)
+            if path.is_symlink():
+                raise OSError('Refusing to delete a linked report')
+            # Remove disk data first so a permission failure does not hide the report in memory.
+            path.unlink(missing_ok=True)
+        del self._reports[report_id]
+        return True
 
     def get(self, report_id: str) -> EvaluationReport | None:
         return self._reports.get(report_id)
@@ -107,6 +140,7 @@ class RetrievalEvaluator:
         concurrency: int = 4,
         config_snapshot: dict | None = None,
         metrics: str = "",
+        config_snapshot_provider=None,
     ) -> None:
         if concurrency < 1:
             raise ValueError("Evaluation concurrency must be positive")
@@ -114,16 +148,26 @@ class RetrievalEvaluator:
         self.store = store
         self.concurrency = concurrency
         self.config_snapshot = config_snapshot
+        self.config_snapshot_provider = config_snapshot_provider
         self.metric_names, _ = select_metrics(metrics)
 
-    async def evaluate(self, request: RetrievalEvaluationRequest) -> RetrievalEvaluationReport:
+    async def evaluate(self, request: RetrievalEvaluationRequest, *, on_progress=None) -> RetrievalEvaluationReport:
         started_at = time()
         started = perf_counter()
+        from .snapshots import evaluation_snapshot
+        snapshot = evaluation_snapshot(self.config_snapshot_provider() if self.config_snapshot_provider else self.config_snapshot,
+                                       request, 'retrieval', self.concurrency)
+        # Fail closed if capture/persistence fails: do not spend model calls without a snapshot.
+        self.store.save_snapshot(snapshot)
         semaphore = asyncio.Semaphore(self.concurrency)
+        from .progress import EvaluationProgress
+        progress = EvaluationProgress(len(request.cases), on_progress)
 
         async def limited(case: EvaluationCase) -> EvaluationCaseResult:
             async with semaphore:
-                return await self._evaluate_case(case, request)
+                result = await self._evaluate_case(case, request)
+                progress.record(result)
+                return result
 
         results = await asyncio.gather(*(limited(case) for case in request.cases))
         comparisons = [result.metrics for result in results if result.metrics is not None]
@@ -137,7 +181,7 @@ class RetrievalEvaluator:
         )
         report = RetrievalEvaluationReport(
             metric_extensions=average_extensions(results),
-            config_snapshot=self.config_snapshot,
+            config_snapshot=snapshot,
             knowledge_base_id=request.knowledge_base_id,
             status=status,
             k=request.k,

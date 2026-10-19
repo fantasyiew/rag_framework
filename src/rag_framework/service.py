@@ -71,7 +71,22 @@ class ServiceRuntime:
         }
         if knowledge_base_id is not None:
             snapshot['knowledge_base_id'] = knowledge_base_id
-            snapshot['embedding_binding'] = self.knowledge_bases.bindings.get(knowledge_base_id)
+            binding = self.knowledge_bases.bindings.get(knowledge_base_id)
+            if binding:
+                safe_settings = config_snapshot(profile_settings(self.settings, binding))['settings']
+                snapshot['embedding_binding'] = {'schema_version': binding.get('schema_version', 1),
+                    'settings': {name: value for name, value in safe_settings.items() if name.startswith('embedding_')}}
+            else:
+                snapshot['embedding_binding'] = None
+            runtime = self.knowledge_bases._load_runtime(knowledge_base_id)
+            snapshot['index_manifest'] = runtime.index_state.manifest()
+            snapshot['effective_index_fingerprint'] = runtime.index_state.fingerprint
+            embedding = runtime.index_state.fingerprint.get('embedding', {})
+            snapshot['components']['embedding'] = {
+                'configured': binding['settings']['embedding_mode'] if binding else self.settings.embedding_mode,
+                'active': embedding.get('provider', 'unavailable'),
+                'implementation': type(runtime.embedder).__name__,
+            }
         return snapshot
 
     def retrieval_evaluator(self, knowledge_base_id: str = "default"):
@@ -79,6 +94,7 @@ class ServiceRuntime:
             self.knowledge_bases.runtime(knowledge_base_id).retriever,
             self.evaluation_store, concurrency=self.settings.evaluation_concurrency,
             config_snapshot=self.audit_snapshot(knowledge_base_id),
+            config_snapshot_provider=lambda: self.audit_snapshot(knowledge_base_id),
             metrics=self.settings.evaluation_metrics,
         )
 
@@ -89,6 +105,7 @@ class ServiceRuntime:
             judge=self.judge_runtime.judge,
             metrics=self.settings.evaluation_metrics,
             config_snapshot=self.audit_snapshot(knowledge_base_id),
+            config_snapshot_provider=lambda: self.audit_snapshot(knowledge_base_id),
         )
 
     async def close(self):

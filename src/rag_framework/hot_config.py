@@ -10,7 +10,7 @@ HOT_FIELDS = {
     'default_top_k', 'default_retrieval_strategy', 'default_retrieval_rerank',
     'fusion_mode', 'fusion_weights', 'fusion_normalization', 'fusion_rank_constant',
     'rrf_rank_constant', 'hybrid_candidate_multiplier', 'reranker_candidate_k',
-    'planner_temperature', 'planner_request_timeout', 'planner_max_retries',
+    'query_planner_mode', 'planner_temperature', 'planner_request_timeout', 'planner_max_retries',
     'planner_minimum_confidence', 'planner_max_rewrites',
     'generation_temperature', 'generation_request_timeout', 'generation_max_retries',
     'generation_max_tokens', 'generation_max_context_chunks',

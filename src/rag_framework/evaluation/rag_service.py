@@ -33,6 +33,7 @@ class RAGEvaluator:
         judge: AnswerJudge | None = None,
         config_snapshot: dict | None = None,
         metrics: str = "",
+        config_snapshot_provider=None,
     ) -> None:
         if concurrency < 1:
             raise ValueError("Evaluation concurrency must be positive")
@@ -41,16 +42,25 @@ class RAGEvaluator:
         self.concurrency = concurrency
         self.judge = judge or HeuristicAnswerJudge()
         self.config_snapshot = config_snapshot
+        self.config_snapshot_provider = config_snapshot_provider
         self.retrieval_metric_names, self.answer_metric_names = select_metrics(metrics)
 
-    async def evaluate(self, request: RAGEvaluationRequest) -> RAGEvaluationReport:
+    async def evaluate(self, request: RAGEvaluationRequest, *, on_progress=None) -> RAGEvaluationReport:
         started_at = time()
         started = perf_counter()
+        from .snapshots import evaluation_snapshot
+        snapshot = evaluation_snapshot(self.config_snapshot_provider() if self.config_snapshot_provider else self.config_snapshot,
+                                       request, 'rag', self.concurrency)
+        self.store.save_snapshot(snapshot)
         semaphore = asyncio.Semaphore(self.concurrency)
+        from .progress import EvaluationProgress
+        progress = EvaluationProgress(len(request.cases), on_progress)
 
         async def limited(case: EvaluationCase) -> RAGEvaluationCaseResult:
             async with semaphore:
-                return await self._evaluate_case(case, request)
+                result = await self._evaluate_case(case, request)
+                progress.record(result)
+                return result
 
         results = await asyncio.gather(*(limited(case) for case in request.cases))
         successful_results = [result for result in results if result.answer_metrics is not None]
@@ -74,7 +84,7 @@ class RAGEvaluator:
         ]
         report = RAGEvaluationReport(
             metric_extensions=average_extensions(results),
-            config_snapshot=self.config_snapshot,
+            config_snapshot=snapshot,
             knowledge_base_id=request.knowledge_base_id,
             status=status,
             k=request.k,

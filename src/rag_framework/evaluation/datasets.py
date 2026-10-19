@@ -89,6 +89,16 @@ class EvaluationDatasetStore:
             for dataset in sorted(datasets, key=lambda item: item.updated_at, reverse=True)
         ]
 
+    def rename(self, dataset_id: str, name: str) -> EvaluationDataset:
+        dataset = self.get(dataset_id)
+        if dataset is None:
+            raise KeyError(dataset_id)
+        if self._path(dataset_id).is_symlink():
+            raise OSError('Refusing to modify a linked dataset record')
+        renamed = EvaluationDataset.model_validate({**dataset.model_dump(), 'name': name.strip()})
+        self.save(renamed)
+        return renamed
+
     def delete(self, dataset_id: str) -> bool:
         """Delete only the named imported record, never JSONL sources or reports."""
         try:

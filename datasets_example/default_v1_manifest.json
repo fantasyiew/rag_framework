@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "knowledge_base_id": "default",
+  "generated_date": "2026-10-18",
+  "snapshot_hash": "7e6d0f272fb14bc69749e2bf9ef3a6d999028d7603e3ed7af6faf00ce9b0a062",
+  "snapshot_hash_definition": "SHA256 of UTF-8 JSON (ensure_ascii=False,sort_keys=True,separators=(',',':')) of id-sorted objects {id,document_id,text,record_index} from Chroma documents collection",
+  "source_chunk_count": 173,
+  "source_backend": "chroma",
+  "source_collection": "documents",
+  "generation_method": "assistant_grounded_authoring_no_external_model_calls",
+  "review_status": "draft_evidence_checked_not_human_reviewed",
+  "excluded_types": {
+    "unanswerable": "Current EvaluationCase requires non-empty relevant_chunk_ids; no fake evidence IDs were created.",
+    "multi_turn": "Out of scope for v1."
+  },
+  "splitting": "Record/document groups; high-related entities assigned to same split. Shared JSON source file, not source-file-disjoint.",
+  "datasets": {
+    "default_tuning_v1": {
+      "file": "default_tuning_v1.jsonl",
+      "case_count": 70,
+      "document_count": 20,
+      "types": {
+        "single_chunk": 20,
+        "paraphrase": 20,
+        "conditional": 9,
+        "exact_match": 11,
+        "multi_chunk": 10
+      }
+    },
+    "default_holdout_v1": {
+      "file": "default_holdout_v1.jsonl",
+      "case_count": 30,
+      "document_count": 9,
+      "types": {
+        "single_chunk": 9,
+        "paraphrase": 9,
+        "exact_match": 6,
+        "conditional": 3,
+        "multi_chunk": 3
+      }
+    }
+  }
+}

@@ -28,8 +28,8 @@ async def test_plan_endpoint_returns_structured_analysis_and_decision(monkeypatc
 async def test_health_exposes_active_planner_without_secrets() -> None:
     payload = await main.health()
 
-    assert payload["configured_query_planner_mode"] in {"heuristic", "llm", "auto"}
-    assert payload["active_query_planner_mode"] in {"heuristic", "llm"}
+    assert payload["configured_query_planner_mode"] in {"disabled", "heuristic", "llm", "auto"}
+    assert payload["active_query_planner_mode"] in {"disabled", "heuristic", "llm"}
     assert payload["configured_evaluation_judge_mode"] in {"heuristic", "llm", "auto"}
     assert payload["active_evaluation_judge_mode"] in {"heuristic", "llm"}
     assert "api_key" not in payload

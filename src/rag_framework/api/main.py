@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from time import perf_counter
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -13,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi import Query as QueryParameter
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rag_framework.config import settings
 from rag_framework.core.models import Document, Query, RAGResponse, RetrievalPlan, RetrievalTrace
@@ -42,6 +43,21 @@ from rag_framework.presets import Preset, config_snapshot, export_preset, valida
 from rag_framework.service import build_service
 from rag_framework.sources.api import source_router
 from rag_framework.traces import TraceStore, capture, complete
+from rag_framework.api.rag_models import RAGRequest, RAGServiceResponse, GenerationResult
+
+
+class RenameEvaluationDatasetRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator('name', mode='before')
+    @classmethod
+    def trim_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class RenameEvaluationReportRequest(RenameEvaluationDatasetRequest):
+    """Only the report display name is mutable."""
 
 
 class IndexDocumentsRequest(BaseModel):
@@ -395,9 +411,56 @@ async def evaluate_rag_dataset(
     )
 
 
+@app.post('/v1/evaluations/{kind}/datasets/{dataset_id}/stream')
+async def stream_dataset_evaluation(kind: str, dataset_id: str, request: DatasetEvaluationRequest):
+    from rag_framework.evaluation.progress import evaluation_events
+    if kind not in {'retrieval', 'rag'}:
+        raise HTTPException(422, '评估类型必须为 retrieval 或 rag')
+    dataset = evaluation_dataset_store.get(dataset_id)
+    if dataset is None:
+        raise HTTPException(404, '测试集不存在')
+    try:
+        knowledge_bases.runtime(request.knowledge_base_id)
+    except KeyError:
+        raise HTTPException(404, '知识库不存在或不可用') from None
+    if kind == 'retrieval':
+        evaluator = retrieval_evaluator if request.knowledge_base_id == 'default' else service.retrieval_evaluator(request.knowledge_base_id)
+        model = RetrievalEvaluationRequest
+    else:
+        evaluator = rag_evaluator if request.knowledge_base_id == 'default' else service.rag_evaluator(request.knowledge_base_id)
+        model = RAGEvaluationRequest
+    # Evaluation labels remain outside the Query; only the target KB is overridden.
+    cases = [case.model_copy(update={'query': case.query.model_copy(update={'knowledge_base_id': request.knowledge_base_id})}) for case in dataset.cases]
+    batch = model(cases=cases, knowledge_base_id=request.knowledge_base_id, k=request.k,
+                  include_trace=request.include_trace, dataset_id=dataset.id)
+    return StreamingResponse(evaluation_events(evaluator, batch), media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 @app.get("/v1/evaluations", response_model=list[AnyEvaluationReportSummary])
 async def list_evaluations() -> list[AnyEvaluationReportSummary]:
     return evaluation_store.list()
+
+
+@app.patch('/v1/evaluations/{report_id}', response_model=EvaluationReport)
+async def rename_evaluation_report(report_id: str, request: RenameEvaluationReportRequest):
+    try:
+        return evaluation_store.rename(report_id, request.name)
+    except KeyError:
+        raise HTTPException(404, '报告不存在或已删除') from None
+    except OSError:
+        raise HTTPException(500, '报告重命名失败，请检查存储权限；原名称未变更') from None
+
+
+@app.delete('/v1/evaluations/{report_id}')
+async def delete_evaluation_report(report_id: str):
+    try:
+        deleted = evaluation_store.delete(report_id)
+    except (OSError, ValueError):
+        raise HTTPException(500, '报告删除失败，请检查存储权限；独立配置快照及 Trace 未删除') from None
+    if not deleted:
+        raise HTTPException(404, '报告不存在或已删除')
+    return {'deleted': True, 'report_id': report_id, 'snapshots_retained': True, 'traces_retained': True}
 
 
 @app.get("/v1/evaluations/{report_id}", response_model=EvaluationReport)
@@ -444,6 +507,16 @@ async def get_evaluation_dataset(dataset_id: str) -> EvaluationDataset:
     return dataset
 
 
+@app.patch('/v1/evaluation-datasets/{dataset_id}', response_model=EvaluationDataset)
+async def rename_evaluation_dataset(dataset_id: str, request: RenameEvaluationDatasetRequest):
+    try:
+        return evaluation_dataset_store.rename(dataset_id, request.name)
+    except KeyError:
+        raise HTTPException(404, '测试集不存在') from None
+    except OSError:
+        raise HTTPException(500, '测试集重命名失败，请检查存储权限') from None
+
+
 @app.delete('/v1/evaluation-datasets/{dataset_id}')
 async def delete_evaluation_dataset(dataset_id: str):
     try:
@@ -474,6 +547,35 @@ async def plan_query(query: Query) -> RetrievalPlan:
     """Inspect query analysis and strategy selection without running retrieval."""
 
     return await planner_runtime.planner.plan(query)
+
+
+@app.post('/v1/rag', response_model=RAGServiceResponse, response_model_exclude_none=True)
+async def rag(request: RAGRequest) -> RAGServiceResponse:
+    """Local shared-config RAG API; drafts and request-level model overrides are excluded."""
+    started = perf_counter()
+    if not request.query.strip():
+        raise HTTPException(422, 'query 不能为空白文本')
+    try:
+        runtime = knowledge_bases.runtime(request.knowledge_base_id)
+    except KeyError:
+        raise HTTPException(404, '知识库不存在或不可用') from None
+    # ConfigurationGateMiddleware pins the applied runtime for the entire request.
+    version = read_state(settings.managed_config_path)['version']
+    fingerprint = config_snapshot(settings)['config_hash']
+    query = Query(text=request.query, knowledge_base_id=request.knowledge_base_id,
+                  conversation_id=request.conversation_id, history=request.history)
+    result = await recorded_run(query, runtime.generation_pipeline.run)
+    contexts = result.retrieval.final_context[:runtime.generation_pipeline.max_context_chunks]
+    status = ('empty_answer' if not result.answer.text.strip() else 'no_context' if not contexts
+              else 'fallback' if result.answer.fallback_used else 'completed')
+    return RAGServiceResponse(request_id=result.retrieval.id,
+        conversation_id=request.conversation_id, knowledge_base_id=request.knowledge_base_id,
+        answer=result.answer.text,
+        generation=GenerationResult(model=result.answer.model, fallback_used=result.answer.fallback_used, status=status),
+        citations=result.answer.citations, contexts=contexts,
+        trace_id=result.retrieval.id, config_version=version, config_hash=fingerprint,
+        duration_ms=(perf_counter() - started) * 1000,
+        trace=result.retrieval if request.include_trace else None)
 
 
 @app.post("/v1/chat", response_model=RAGResponse)
